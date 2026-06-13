@@ -3,8 +3,13 @@ ai_analysis.py
 ==============
 Gemini 2.5 Flash Lite を使ったAI分析コメント生成
 
-【モデル】
+【使用モデル】
   gemini-2.5-flash-lite-preview-06-17（最新・無料枠対応）
+
+【v3修正内容】
+  Fix①  プロンプト内の配当利回り表示も安全な変換に統一
+  Fix②  JSONパース失敗時のフォールバックを強化
+  Fix③  _fallback() 内の配当利回り表示も安全な変換に統一
 
 【節約設計】
   - st.session_state でセッション内キャッシュ
@@ -20,10 +25,7 @@ import streamlit as st
 import requests
 import json
 
-# ────────────────────────────────
-# 使用モデル（ここだけ変えれば切り替え可）
-# ────────────────────────────────
-MODEL = "gemini-2.5-flash-lite-preview-06-17"
+MODEL   = "gemini-2.5-flash-lite-preview-06-17"
 API_URL = (
     "https://generativelanguage.googleapis.com/v1beta"
     "/models/{model}:generateContent?key={key}"
@@ -50,23 +52,18 @@ def get_ai_analysis(
           "source"   : "ai" or "fallback",
         }
     """
-    # ── セッションキャッシュ確認 ────
-    # 同じ銘柄は1セッション1回だけAPIを呼ぶ（節約）
     cache_key = f"ai_{code}"
     if cache_key in st.session_state:
         return st.session_state[cache_key]
 
-    # ── APIキー確認 ─────────────────
     api_key = st.secrets.get("GEMINI_API_KEY", "")
     if not api_key or api_key == "your_api_key_here":
         result = _fallback(name, score, tv, info, code, yutai)
         st.session_state[cache_key] = result
         return result
 
-    # ── プロンプト組み立て ──────────
     prompt = _build_prompt(name, code, score, info, tv, yutai)
 
-    # ── API呼び出し ─────────────────
     try:
         url = API_URL.format(model=MODEL, key=api_key)
         payload = {
@@ -86,22 +83,22 @@ def get_ai_analysis(
                 ]
             ],
         }
-        res = requests.post(url, json=payload, timeout=25,
-                            headers={"Content-Type": "application/json"})
+        res = requests.post(
+            url, json=payload, timeout=25,
+            headers={"Content-Type": "application/json"},
+        )
         res.raise_for_status()
 
-        raw = _extract(res.json())
+        raw    = _extract(res.json())
         result = _parse(raw, score, code)
         result["source"] = "ai"
 
     except requests.exceptions.HTTPError as e:
-        code_num = e.response.status_code if e.response else 0
-        if code_num == 429:
-            st.warning("⚠️ Gemini APIのレート制限に達しました。簡易コメントを表示します。")
-        elif code_num == 400:
-            st.warning("⚠️ APIキーが正しくない可能性があります。secrets.toml を確認してください。")
-        else:
-            st.warning(f"⚠️ Gemini APIエラー（{code_num}）。簡易コメントを表示します。")
+        status = e.response.status_code if e.response else 0
+        msg = {429: "レート制限に達しました", 400: "APIキーが正しくない可能性があります"}.get(
+            status, f"APIエラー（{status}）"
+        )
+        st.warning(f"⚠️ Gemini {msg}。簡易コメントを表示します。")
         result = _fallback(name, score, tv, info, code, yutai)
 
     except requests.exceptions.Timeout:
@@ -112,7 +109,6 @@ def get_ai_analysis(
         st.warning(f"⚠️ エラー: {str(e)[:60]}。簡易コメントを表示します。")
         result = _fallback(name, score, tv, info, code, yutai)
 
-    # セッションキャッシュに保存
     st.session_state[cache_key] = result
     return result
 
@@ -124,16 +120,15 @@ def _build_prompt(name, code, score, info, tv, yutai) -> str:
     """Geminiに渡すプロンプトを組み立てる"""
 
     def _f(v, d=2, s=""):
-        # 数値を安全にフォーマット
         try:
             return f"{float(v):.{d}f}{s}" if v is not None else "不明"
         except Exception:
             return "不明"
 
-    per  = info.get("trailingPE") or info.get("forwardPE")
-    pbr  = info.get("priceToBook")
-    dy   = info.get("dividendYield")
-    dy_s = f"{float(dy)*100:.2f}%" if dy else "無配当"
+    per = info.get("trailingPE") or info.get("forwardPE")
+    pbr = info.get("priceToBook")
+    # Fix① プロンプト内でも安全な変換を使用
+    dy_s = _safe_div_str(info.get("dividendYield"))
 
     return f"""あなたは日本株の長期投資アドバイザーです。
 投資初心者（20〜30代女性）に向けて、やさしく正直な分析を行ってください。
@@ -169,7 +164,7 @@ def _build_prompt(name, code, score, info, tv, yutai) -> str:
 def _extract(data: dict) -> str:
     """Gemini APIのレスポンスからテキストを取り出す"""
     try:
-        return (data["candidates"][0]["content"]["parts"][0]["text"].strip())
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
     except (KeyError, IndexError):
         return ""
 
@@ -177,13 +172,13 @@ def _extract(data: dict) -> str:
 def _parse(raw: str, score: dict, code: str) -> dict:
     """
     GeminiのJSON出力をパースする。
-    失敗時は _fallback() の結果を返す。
+    Fix② パース失敗パターンを増やして堅牢化
     """
-    # ```json ... ``` ブロックがあれば除去
     text = raw.strip()
+    # ```json ... ``` ブロックを除去
     if "```" in text:
         lines = [l for l in text.splitlines() if not l.strip().startswith("```")]
-        text = "\n".join(lines)
+        text  = "\n".join(lines).strip()
 
     try:
         d = json.loads(text)
@@ -193,11 +188,11 @@ def _parse(raw: str, score: dict, code: str) -> dict:
             "comment"  : d.get("comment",   "コメントを取得できませんでした"),
         }
     except json.JSONDecodeError:
-        # パース失敗時はテキストをそのままコメントに
+        # パース失敗: テキストからコメントだけ使う
         return {
             "strengths": ["AI分析を取得しました"],
             "risks"    : ["株式投資にはリスクが伴います"],
-            "comment"  : raw[:200],
+            "comment"  : raw[:200] if raw else "コメントを取得できませんでした",
         }
 
 
@@ -205,23 +200,20 @@ def _parse(raw: str, score: dict, code: str) -> dict:
 # フォールバック（APIなし時）
 # ────────────────────────────────
 def _fallback(name, score, tv, info, code, yutai) -> dict:
-    """
-    APIキー未設定・エラー時のフォールバック。
-    Pythonの条件分岐だけでコメントを生成する。
-    """
-    total  = score.get("total", 50)
-    dy     = info.get("dividendYield")
-    trend  = tv.get("trend", "")
-    rsi    = tv.get("rsi")
+    """APIキー未設定・エラー時のフォールバック"""
+    total = score.get("total", 50)
+    dy    = info.get("dividendYield")
+    # Fix③ フォールバック内でも安全な変換を使用
+    dy_pct = _safe_div_pct(dy)
+    trend = tv.get("trend", "")
+    rsi   = tv.get("rsi")
 
-    strengths = []
-    risks     = []
+    strengths, risks = [], []
 
-    # 強み
     if "上昇" in trend:
         strengths.append("中長期の上昇トレンドが継続しています")
-    if dy and dy * 100 >= 3:
-        strengths.append(f"配当利回り{dy*100:.1f}%と魅力的な水準です")
+    if dy_pct and dy_pct >= 3:
+        strengths.append(f"配当利回り{dy_pct:.1f}%と魅力的な水準です")
     if yutai.get("yutai_value", 0) >= 1000:
         strengths.append("株主優待が充実しており生活でもお得に活かせます")
     if score.get("finance", 0) >= 65:
@@ -229,7 +221,6 @@ def _fallback(name, score, tv, info, code, yutai) -> dict:
     if not strengths:
         strengths.append("スクリーニング条件を一定数クリアしています")
 
-    # リスク
     if rsi and rsi >= 70:
         risks.append(f"RSI {rsi:.0f}と過熱感があります。短期的な調整に注意")
     if "下降" in trend:
@@ -237,7 +228,6 @@ def _fallback(name, score, tv, info, code, yutai) -> dict:
     if not risks:
         risks.append("株式投資は元本保証がありません。余裕資金で運用しましょう")
 
-    # まとめコメント
     if total >= 70:
         comment = f"総合スコア{total}点と高水準です。長期保有の候補として検討できます 🌸"
     elif total >= 55:
@@ -256,3 +246,32 @@ def _fallback(name, score, tv, info, code, yutai) -> dict:
         "comment"  : comment,
         "source"   : "fallback",
     }
+
+
+# ────────────────────────────────
+# 内部ユーティリティ
+# ────────────────────────────────
+def _safe_div_str(dy) -> str:
+    """配当利回りを安全にパーセント文字列へ変換（recommend.pyと同じロジック）"""
+    if dy is None:
+        return "無配当"
+    try:
+        val = float(dy)
+        pct = val * 100 if val <= 1.0 else val
+        if pct < 0.1 or pct > 30:
+            return "―"
+        return f"{pct:.2f}%"
+    except (TypeError, ValueError):
+        return "―"
+
+
+def _safe_div_pct(dy) -> float | None:
+    """配当利回りをfloat（パーセント値）で返す。異常値はNone"""
+    if dy is None:
+        return None
+    try:
+        val = float(dy)
+        pct = val * 100 if val <= 1.0 else val
+        return pct if 0.1 <= pct <= 30 else None
+    except (TypeError, ValueError):
+        return None

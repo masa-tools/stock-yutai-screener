@@ -186,15 +186,19 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
     fin = min(25, fin)
 
     # ── ② 配当スコア（0〜25点） ────
+    # Fix: yfinanceは小数形式(0.035=3.5%)で返すが稀に%形式(3.5)で返す
+    #      1.0超なら既に%形式と判定し30%超は異常値として除外
     div = 0
     dy  = _nv(info, "dividendYield")
-    if dy:
-        p = dy * 100
-        if   3.0 <= p <= 5.5: div = 25
-        elif 2.0 <= p < 3.0 : div = 18
-        elif 5.5 < p <= 8.0 : div = 13   # 高すぎは持続性不安
-        elif 1.0 <= p < 2.0 : div = 10
-        elif p > 8.0         : div = 5
+    if dy is not None:
+        raw_dy = float(info.get("dividendYield", 0) or 0)
+        p = raw_dy * 100 if raw_dy <= 1.0 else raw_dy
+        if 0.1 <= p <= 30:   # 現実的な範囲のみスコア計算
+            if   3.0 <= p <= 5.5: div = 25
+            elif 2.0 <= p < 3.0 : div = 18
+            elif 5.5 < p <= 8.0 : div = 13   # 高すぎは持続性不安
+            elif 1.0 <= p < 2.0 : div = 10
+            elif p > 8.0         : div = 5
 
     # ── ③ テクニカルスコア（0〜30点） ─
     tech = 0
@@ -251,7 +255,16 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
 
     # ── 評価マーク ─────────────────
     long_mark  = "◎" if total >= 72 else "○" if total >= 52 else "△"
-    div_mark   = "◎" if dy and dy*100 >= 3 else "○" if dy and dy*100 >= 1.5 else "△"
+    # 配当評価マーク（安全な変換を使用）
+    def _div_pct(raw):
+        if raw is None: return 0
+        try:
+            v = float(raw)
+            p = v * 100 if v <= 1.0 else v
+            return p if 0.1 <= p <= 30 else 0
+        except Exception: return 0
+    _dp = _div_pct(info.get("dividendYield"))
+    div_mark   = "◎" if _dp >= 3 else "○" if _dp >= 1.5 else "△"
     tech_mark  = "◎" if tech >= 22 else "○" if tech >= 14 else "△"
 
     return {
@@ -291,11 +304,18 @@ def _make_comments(total: int, tv: dict, dy, per) -> list[str]:
         else:
             comments.append("過熱感はなく、落ち着いた水準です。")
 
-    # 配当コメント
-    if dy and dy * 100 >= 3.0:
-        comments.append(f"配当利回り{dy*100:.1f}%と魅力的な水準です。")
-    elif dy and dy * 100 >= 1.5:
-        comments.append("安定した配当が見込めます。")
+    # 配当コメント（安全な変換を使用）
+    if dy is not None:
+        try:
+            raw_dy = float(dy)
+            dy_pct = raw_dy * 100 if raw_dy <= 1.0 else raw_dy
+            if 0.1 <= dy_pct <= 30:
+                if dy_pct >= 3.0:
+                    comments.append(f"配当利回り{dy_pct:.1f}%と魅力的な水準です。")
+                elif dy_pct >= 1.5:
+                    comments.append("安定した配当が見込めます。")
+        except (TypeError, ValueError):
+            pass
 
     # 出来高コメント
     if vr >= 1.5:
@@ -339,24 +359,30 @@ def draw_candlestick(df: pd.DataFrame, name: str = "") -> BytesIO | None:
         if len(plot_df) < 10:
             return None
 
+        # base_mpf_style="white" は mplfinance 新バージョンで廃止
+        # → "default" を使い、rcで白背景を自前で上書きする
+        mc = mpf.make_marketcolors(
+            up=COLORS["up"], down=COLORS["down"],
+            edge={"up": COLORS["up"], "down": COLORS["down"]},
+            wick={"up": COLORS["up"], "down": COLORS["down"]},
+            volume=COLORS["vol"],
+        )
         style = mpf.make_mpf_style(
             base_mpf_style="default",
+            marketcolors=mc,
             rc={
-                "axes.facecolor"  : COLORS["bg"],
-                "figure.facecolor": COLORS["bg"],
-                "axes.edgecolor"  : "#e0c8d0",
-                "xtick.color"     : "#999",
-                "ytick.color"     : "#999",
-                "grid.color"      : COLORS["grid"],
-                "grid.linestyle"  : "--",
-                "grid.alpha"      : 0.6,
+                "axes.facecolor"   : COLORS["bg"],
+                "figure.facecolor" : COLORS["bg"],
+                "savefig.facecolor": COLORS["bg"],
+                "axes.edgecolor"   : "#e0c8d0",
+                "axes.spines.top"  : False,
+                "axes.spines.right": False,
+                "xtick.color"      : "#999",
+                "ytick.color"      : "#999",
+                "grid.color"       : COLORS["grid"],
+                "grid.linestyle"   : "--",
+                "grid.alpha"       : 0.6,
             },
-            marketcolors=mpf.make_marketcolors(
-                up=COLORS["up"], down=COLORS["down"],
-                edge={"up": COLORS["up"], "down": COLORS["down"]},
-                wick={"up": COLORS["up"], "down": COLORS["down"]},
-                volume=COLORS["vol"],
-            ),
         )
 
         adds = []
