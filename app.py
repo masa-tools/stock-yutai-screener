@@ -1,17 +1,20 @@
 """
-app.py
-======
-AI長期投資・株主優待スクリーナー v4.0
+app.py  v5.0
+============
+AI長期投資・株主優待スクリーナー
 
 起動: streamlit run app.py
 
-【v4.0 追加機能】
-  ① ❤️ お気に入りウォッチリスト（favorites.py）
-  ② 💰 配当シミュレーター（dividend_sim.py）
-  ③ 📅 配当・優待カレンダー（calendar_tab.py）
-  ④ 📈 増配ランキング（dividend_ranking.py）
-  ⑤ 🎯 買い時判定（buy_timing.py）
-  ⑥ ⭐ おすすめ銘柄スコアリング全面刷新（recommend.py v4）
+【v5.0 変更】
+  ① ウォッチリスト: session_state + JSON のハイブリッド保存
+  ② 配当シミュレーター: +100/500/1000株ボタン・税引後表示
+  ③ カレンダー: 125銘柄対応
+  ④ 銘柄名日本語化: JP_NAMES マスター
+  ⑤ おすすめ銘柄 TOP5 → TOP10
+  ⑥ トップページ緑バナーを削除
+  ⑦ 根拠リスト（箇条書き3〜6項目）＋総合評価文
+  ⑧ スコアリング精度向上
+  ⑨ スマホ対応CSS・レイアウト
 """
 
 import streamlit as st
@@ -23,7 +26,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── モジュール読み込み ─────────────────────────────
 from stock_data         import get_price_data, get_stock_info, get_display_name
 from technical_analysis import add_indicators, get_latest_values, calc_simple_score, draw_candlestick
 from yutai_data         import get_yutai
@@ -45,17 +47,8 @@ from ui_components      import (
 # タブ1: 銘柄分析
 # ════════════════════════════════════════
 def render_analysis_tab(is_ai: bool) -> None:
-    """銘柄分析タブを描画する"""
 
-    if not is_ai:
-        st.markdown("""
-<div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:12px;
-            padding:0.6rem 1rem;font-size:0.85rem;color:#2e7d32;margin-bottom:0.8rem;">
-    🟢 <strong>簡易分析モード</strong>：Gemini APIは使いません。完全無料で動作します。
-</div>
-""", unsafe_allow_html=True)
-
-    # ── 証券コード入力 ──────────────────────────────
+    # ── 入力 ────────────────────────────────────────
     st.markdown('<p class="sec-title">📊 証券コードを入力して分析</p>',
                 unsafe_allow_html=True)
 
@@ -76,21 +69,21 @@ def render_analysis_tab(is_ai: bool) -> None:
         ("JT",   "2914"), ("SMFG",  "8316"), ("OLC",   "4661"),
     ]
     cols = st.columns(len(quick))
-    for i, (lbl, qcode) in enumerate(quick):
+    for i, (lbl, qc) in enumerate(quick):
         with cols[i]:
-            if st.button(f"🔖 {lbl}", key=f"q{qcode}"):
-                code = qcode
+            if st.button(f"🔖 {lbl}", key=f"q{qc}"):
+                code = qc
                 btn  = True
 
-    # ── 未入力時の案内 ──────────────────────────────
+    # ── 未入力 ──────────────────────────────────────
     if not (btn and code):
         st.markdown("""
-<div class="card" style="text-align:center;padding:2.5rem;opacity:0.75;">
-    <div style="font-size:2.8rem;">🌸</div>
-    <div style="font-size:1.05rem;font-weight:600;color:#c2185b;margin-top:0.7rem;">
+<div class="card" style="text-align:center;padding:2.2rem;opacity:0.75;">
+    <div style="font-size:2.5rem;">🌸</div>
+    <div style="font-size:1.0rem;font-weight:600;color:#c2185b;margin-top:0.7rem;">
         証券コードを入力して「分析する」を押してください
     </div>
-    <div style="font-size:0.85rem;color:#999;margin-top:0.3rem;">
+    <div style="font-size:0.83rem;color:#999;margin-top:0.3rem;">
         上のボタンで人気銘柄をすぐに試せます
     </div>
 </div>
@@ -108,17 +101,17 @@ def render_analysis_tab(is_ai: bool) -> None:
         st.error(f"⚠️ 「{code}」のデータが見つかりません。4桁のコードを確認してください。")
         return
 
-    # ── 指標計算 ────────────────────────────────────
+    # ── 計算 ────────────────────────────────────────
     df   = add_indicators(df_raw)
     tv   = get_latest_values(df)
     sc   = calc_simple_score(info, tv, code)
-    name = get_display_name(info, code)
+    name = get_display_name(info, code)   # ④ 日本語名優先
     yi   = get_yutai(code)
 
-    # ①  銘柄ヘッダー
+    # ① 銘柄ヘッダー
     render_stock_header(name, code, tv, sc["total"])
 
-    # ─── ❤️ お気に入りボタン（ヘッダー直下） ──────
+    # ❤️ ウォッチリストボタン（① 修正版）
     dy_str = _fmt_div(info.get("dividendYield"))
     render_favorite_button(
         code=code, name=name,
@@ -127,18 +120,18 @@ def render_analysis_tab(is_ai: bool) -> None:
         score=sc["total"],
     )
 
-    # ②  基本指標カード
+    # ② 基本指標
     st.markdown('<p class="sec-title">📋 基本データ</p>', unsafe_allow_html=True)
     render_metrics(info, tv)
 
-    # ─── 株主優待情報 ───────────────────────────────
+    # 株主優待情報
     st.markdown('<p class="sec-title">🎁 株主優待情報</p>', unsafe_allow_html=True)
     _render_yutai(yi, tv)
 
-    # ─── 💰 配当シミュレーター ──────────────────────
+    # 💰 配当シミュレーター（② 修正版）
     render_dividend_simulator(info, tv.get("close", 0))
 
-    # ③  チャート
+    # チャート（⑤ use_container_width）
     st.markdown('<p class="sec-title">📈 株価チャート</p>', unsafe_allow_html=True)
     with st.spinner("チャートを描画中..."):
         buf = draw_candlestick(df, name)
@@ -147,14 +140,14 @@ def render_analysis_tab(is_ai: bool) -> None:
         else:
             st.warning("チャートデータが不足しています（上場間もない銘柄等）")
 
-    # ④  テクニカル分析
+    # テクニカル分析
     st.markdown('<p class="sec-title">🔬 テクニカル分析</p>', unsafe_allow_html=True)
     render_technical(tv)
 
-    # ─── 🎯 買い時判定 ──────────────────────────────
+    # 🎯 買い時判定
     render_buy_timing(tv, sc, info)
 
-    # ⑤  分析コメント（モード切替）
+    # 💬 分析コメント
     st.markdown('<p class="sec-title">💬 分析コメント</p>', unsafe_allow_html=True)
     if is_ai:
         with st.spinner("✨ AIが分析中...🌸"):
@@ -168,24 +161,22 @@ def render_analysis_tab(is_ai: bool) -> None:
 # 株主優待カード
 # ────────────────────────────────────────
 def _render_yutai(yi: dict, tv: dict) -> None:
-    """株主優待情報を3列カードで表示"""
     close      = tv.get("close", 0)
     min_shares = yi.get("min_shares", 100)
     min_invest = close * min_shares
 
-    cols = st.columns(3)
-    with cols[0]:
+    c1, c2, c3 = st.columns(3)
+    with c1:
         st.markdown(f"""
 <div class="m-card">
     <div class="m-label">🎁 優待内容</div>
-    <div style="font-size:0.93rem;font-weight:600;color:#3d2b1f;
+    <div style="font-size:0.9rem;font-weight:600;color:#3d2b1f;
                 margin-top:0.3rem;line-height:1.5;">
         {yi.get('yutai','データなし')}
     </div>
 </div>
 """, unsafe_allow_html=True)
-
-    with cols[1]:
+    with c2:
         st.markdown(f"""
 <div class="m-card">
     <div class="m-label">📅 権利確定月</div>
@@ -193,84 +184,78 @@ def _render_yutai(yi: dict, tv: dict) -> None:
     <div class="m-sub">この月末に保有でOK</div>
 </div>
 """, unsafe_allow_html=True)
-
-    with cols[2]:
+    with c3:
         st.markdown(f"""
 <div class="m-card">
     <div class="m-label">💰 最低投資金額</div>
-    <div class="m-value" style="font-size:1.2rem;">
-        ¥{min_invest:,.0f}
-    </div>
+    <div class="m-value" style="font-size:1.15rem;">¥{min_invest:,.0f}</div>
     <div class="m-sub">{min_shares}株 × 現在株価</div>
-    <div class="m-hint">少額から始めるなら積立NISAも検討を</div>
 </div>
 """, unsafe_allow_html=True)
 
 
 # ────────────────────────────────────────
-# AI分析結果の表示
+# AI分析結果
 # ────────────────────────────────────────
 def _render_ai_result(ai: dict, sc: dict) -> None:
-    """AI分析コメント（強み・リスク・総括）をカード表示"""
     total  = sc.get("total", 50)
     lm     = sc.get("long_mark", "○")
     dm     = sc.get("div_mark",  "○")
     tm     = sc.get("tech_mark", "○")
     source = ai.get("source", "fallback")
 
-    src_html = (
+    src_tag = (
         '<span style="background:#e8eaf6;color:#6a1b9a;border-radius:50px;'
-        'padding:0.1rem 0.65rem;font-size:0.72rem;font-weight:600;">'
-        '✨ Gemini AI</span>'
+        'padding:0.08rem 0.6rem;font-size:0.72rem;font-weight:600;">✨ Gemini AI</span>'
         if source == "ai" else
         '<span style="background:#e8f5e9;color:#2e7d32;border-radius:50px;'
-        'padding:0.1rem 0.65rem;font-size:0.72rem;font-weight:600;">'
-        '🟢 簡易分析</span>'
+        'padding:0.08rem 0.6rem;font-size:0.72rem;font-weight:600;">🟢 簡易分析</span>'
     )
-
     s_html = "".join(
-        f'<div style="padding:0.3rem 0;color:#2e7d32;font-size:0.9rem;">✅ {s}</div>'
-        for s in ai.get("strengths", [])
-    )
+        f'<div style="padding:0.28rem 0;color:#2e7d32;font-size:0.88rem;">✅ {s}</div>'
+        for s in ai.get("strengths", []))
     r_html = "".join(
-        f'<div style="padding:0.3rem 0;color:#c62828;font-size:0.9rem;">⚠️ {r}</div>'
-        for r in ai.get("risks", [])
-    )
+        f'<div style="padding:0.28rem 0;color:#c62828;font-size:0.88rem;">⚠️ {r}</div>'
+        for r in ai.get("risks", []))
 
     st.markdown(f"""
 <div class="card">
-    <div style="display:flex;gap:1.8rem;flex-wrap:wrap;align-items:center;
-                margin-bottom:1.1rem;padding-bottom:1rem;border-bottom:1px solid #fce4ec;">
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;
+                margin-bottom:1rem;padding-bottom:0.8rem;border-bottom:1px solid #fce4ec;">
         <div>
             <div class="m-label">総合スコア</div>
-            <div class="score-badge" style="font-size:1.5rem;padding:0.28rem 1rem;margin-top:0.2rem;">
+            <div class="score-badge" style="font-size:1.4rem;padding:0.25rem 0.9rem;margin-top:0.2rem;">
                 {total}点
             </div>
         </div>
         <div style="text-align:center;">
             <div class="m-label">長期保有</div>
-            <div style="font-size:1.5rem;margin-top:0.15rem;">{lm}</div>
+            <div style="font-size:1.4rem;margin-top:0.12rem;">{lm}</div>
         </div>
         <div style="text-align:center;">
             <div class="m-label">配当評価</div>
-            <div style="font-size:1.5rem;margin-top:0.15rem;">{dm}</div>
+            <div style="font-size:1.4rem;margin-top:0.12rem;">{dm}</div>
         </div>
         <div style="text-align:center;">
             <div class="m-label">テクニカル</div>
-            <div style="font-size:1.5rem;margin-top:0.15rem;">{tm}</div>
+            <div style="font-size:1.4rem;margin-top:0.12rem;">{tm}</div>
         </div>
-        <div style="margin-left:auto;">{src_html}</div>
+        <div style="margin-left:auto;">{src_tag}</div>
     </div>
-    <div style="margin-bottom:0.9rem;">
-        <div style="font-weight:700;color:#2e7d32;margin-bottom:0.35rem;font-size:0.9rem;">💪 強み</div>
+    <div style="margin-bottom:0.8rem;">
+        <div style="font-weight:700;color:#2e7d32;margin-bottom:0.3rem;font-size:0.88rem;">
+            💪 強み
+        </div>
         {s_html}
     </div>
-    <div style="margin-bottom:0.9rem;">
-        <div style="font-weight:700;color:#c62828;margin-bottom:0.35rem;font-size:0.9rem;">⚠️ リスク・注意点</div>
+    <div style="margin-bottom:0.8rem;">
+        <div style="font-weight:700;color:#c62828;margin-bottom:0.3rem;font-size:0.88rem;">
+            ⚠️ リスク
+        </div>
         {r_html}
     </div>
-    <div style="background:#fdf0f8;border-radius:12px;padding:0.9rem 1.1rem;
-                line-height:1.8;color:#3d2b1f;font-size:0.93rem;white-space:pre-wrap;">
+    <div style="background:#fdf0f8;border-radius:10px;padding:0.8rem 1rem;
+                line-height:1.8;color:#3d2b1f;font-size:0.9rem;white-space:pre-wrap;">
 {ai.get('comment','―')}
     </div>
 </div>
@@ -278,28 +263,28 @@ def _render_ai_result(ai: dict, sc: dict) -> None:
 
 
 # ────────────────────────────────────────
-# 配当利回りユーティリティ（app.py内用）
+# ユーティリティ
 # ────────────────────────────────────────
 def _fmt_div(dy) -> str:
     if dy is None:
         return "無配当"
     try:
-        val = float(dy)
-        pct = val * 100 if val <= 1.0 else val
-        return f"{pct:.2f}%" if 0.1 <= pct <= 30 else "―"
+        v = float(dy)
+        p = v * 100 if v <= 1.0 else v
+        return f"{p:.2f}%" if 0.1 <= p <= 30 else "―"
     except (TypeError, ValueError):
         return "―"
 
 
 # ════════════════════════════════════════
-# メイン処理
+# メイン
 # ════════════════════════════════════════
 render_css()
 render_header()
 
-# ── モード切替 UI ──────────────────────────────
+# ── モード切替 ──────────────────────────────
 st.markdown("#### 🎛️ 分析モードを選択")
-col_m, col_desc = st.columns([2, 3])
+col_m, col_d = st.columns([2, 3])
 
 with col_m:
     mode = st.radio(
@@ -307,24 +292,24 @@ with col_m:
         ["✨ AI分析モード", "🟢 簡易モード（API節約）"],
         index=1,
         label_visibility="collapsed",
-        help="AIモードはGemini APIを使用。簡易モードはAPIゼロ・完全無料。",
     )
 
-with col_desc:
+with col_d:
     if mode == "✨ AI分析モード":
         st.markdown("""
-<div style="background:linear-gradient(135deg,#e8eaf6,#d1c4e9);border:2px solid #9c27b0;
-            border-radius:14px;padding:0.65rem 1.1rem;font-weight:600;color:#6a1b9a;font-size:0.9rem;">
-    ✨ Gemini APIで詳細コメントを生成。<code>.streamlit/secrets.toml</code> にAPIキーが必要です。
+<div style="background:linear-gradient(135deg,#e8eaf6,#d1c4e9);
+            border:2px solid #9c27b0;border-radius:12px;
+            padding:0.6rem 1rem;font-weight:600;color:#6a1b9a;font-size:0.88rem;">
+    ✨ Gemini APIで詳細コメントを生成。
+    <code>.streamlit/secrets.toml</code> にAPIキーが必要です。
 </div>
 """, unsafe_allow_html=True)
     else:
-        st.markdown("""
-<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:2px solid #4caf50;
-            border-radius:14px;padding:0.65rem 1.1rem;font-weight:600;color:#2e7d32;font-size:0.9rem;">
-    🟢 APIゼロ・完全無料。Pythonのみで分析します。初めての方におすすめ！
-</div>
-""", unsafe_allow_html=True)
+        # ⑥ 緑バナーを削除 → シンプルなテキストのみ
+        st.markdown(
+            "<div style='padding-top:0.4rem;font-size:0.87rem;color:#555;'>"
+            "🟢 APIキー不要・完全無料で動作します。</div>",
+            unsafe_allow_html=True)
 
 IS_AI = (mode == "✨ AI分析モード")
 
@@ -334,12 +319,12 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── タブ（6タブ構成） ─────────────────────────
+# ── タブ ────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔍 銘柄分析",
-    "⭐ AIおすすめ銘柄",
+    "⭐ おすすめTOP10",
     "❤️ ウォッチリスト",
-    "📅 配当・優待カレンダー",
+    "📅 カレンダー",
     "📈 増配ランキング",
 ])
 
@@ -358,10 +343,9 @@ with tab4:
 with tab5:
     render_dividend_ranking_tab()
 
-# フッター
 st.markdown("""
 <div class="footer">
-    🌸 株主優待スクリーナー v4.0 ｜ データ: Yahoo Finance ｜ AI: Gemini 2.5 Flash Lite<br>
+    🌸 株主優待スクリーナー v5.0 ｜ データ: Yahoo Finance ｜ AI: Gemini 2.5 Flash Lite<br>
     ※ 投資判断はご自身の責任でお願いします。
 </div>
 """, unsafe_allow_html=True)

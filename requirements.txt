@@ -1,15 +1,10 @@
-# requirements.txt
-# ════════════════════════════════════════
-# 株主優待スクリーナー v4.0
-# ════════════════════════════════════════
-# インストール: pip install -r requirements.txt
-# 推奨Python: 3.10以上
-
-streamlit>=1.32.0       # Webアプリ本体
-yfinance>=0.2.38        # 株価データ取得（Yahoo Finance）
-pandas>=2.0.0           # データ処理
-numpy>=1.24.0           # 数値計算
-ta>=0.11.0              # テクニカル指標（RSI・MACD等）
-mplfinance>=0.12.10b0   # ローソク足チャート
-matplotlib>=3.7.0       # グラフ描画
-requests>=2.31.0        # Gemini API HTTP通信
+# requirements.txt  v5.0
+# pip install -r requirements.txt
+streamlit>=1.32.0
+yfinance>=0.2.38
+pandas>=2.0.0
+numpy>=1.24.0
+ta>=0.11.0
+mplfinance>=0.12.10b0
+matplotlib>=3.7.0
+requests>=2.31.0
