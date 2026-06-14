@@ -1,6 +1,6 @@
 """
-dividend_ranking.py
-===================
+dividend_ranking.py  v6.0
+=========================
 📈 増配ランキングタブ
 
 CANDIDATES の銘柄を「配当の質」でランキングする。
@@ -20,7 +20,7 @@ import streamlit as st
 import time
 from datetime import datetime
 
-from stock_data         import get_price_data, get_stock_info, get_display_name
+from stock_data         import get_price_data, get_stock_info, get_display_name, JP_NAMES
 from yutai_data         import get_yutai
 
 from candidate_stocks import get_candidates as _get_candidates
