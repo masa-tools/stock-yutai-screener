@@ -1,20 +1,16 @@
 """
-app.py  v5.0
+app.py  v7.0
 ============
 AI長期投資・株主優待スクリーナー
 
-起動: streamlit run app.py
-
-【v5.0 変更】
-  ① ウォッチリスト: session_state + JSON のハイブリッド保存
-  ② 配当シミュレーター: +100/500/1000株ボタン・税引後表示
-  ③ カレンダー: 125銘柄対応
-  ④ 銘柄名日本語化: JP_NAMES マスター
-  ⑤ おすすめ銘柄 TOP5 → TOP10
-  ⑥ トップページ緑バナーを削除
-  ⑦ 根拠リスト（箇条書き3〜6項目）＋総合評価文
-  ⑧ スコアリング精度向上
-  ⑨ スマホ対応CSS・レイアウト
+【v7.0 変更】
+  ① ウォッチリスト: st.rerun()廃止 → on_click方式でフリーズ解消
+  ② 配当シミュレーター: 機能を完全削除
+  ③ 配当推移グラフ: dividend_history.py を追加
+  ④ 株主優待詳細: 株数別・長期保有条件・補足を表示
+  ⑤ 企業名検索: 社名入力→コード変換に対応
+  ⑥ 業種表示: 基本データ欄に追加
+  ⑦ クイックボタン: NTT・KDDIの2銘柄のみに絞る
 """
 
 import streamlit as st
@@ -26,21 +22,83 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-from stock_data         import get_price_data, get_stock_info, get_display_name
-from technical_analysis import add_indicators, get_latest_values, calc_simple_score, draw_candlestick
-from yutai_data         import get_yutai
-from ai_analysis        import get_ai_analysis
-from recommend          import render_recommend_tab
-from favorites          import render_watchlist_tab, render_favorite_button
-from dividend_sim       import render_dividend_simulator
-from buy_timing         import render_buy_timing
-from calendar_tab       import render_calendar_tab
-from dividend_ranking   import render_dividend_ranking_tab
-from ui_components      import (
+# ── モジュール読み込み ──────────────────────────────
+from stock_data        import get_price_data, get_stock_info, get_display_name
+from technical_analysis import (add_indicators, get_latest_values,
+                                calc_simple_score, draw_candlestick)
+from yutai_data        import get_yutai
+from ai_analysis       import get_ai_analysis
+from recommend         import render_recommend_tab
+from favorites         import render_watchlist_tab, render_favorite_button
+from buy_timing        import render_buy_timing
+from calendar_tab      import render_calendar_tab
+from dividend_ranking  import render_dividend_ranking_tab
+from dividend_history  import render_dividend_history       # ③ 新規
+from candidate_stocks  import get_candidates               # ⑤ 企業名検索用
+from ui_components     import (
     render_css, render_header,
     render_stock_header, render_metrics,
     render_technical, render_score,
 )
+
+# ⑤ 企業名→コード変換辞書（起動時に1回だけ構築）
+@st.cache_data
+def _build_name_to_code() -> dict[str, str]:
+    """
+    候補銘柄リストと JP_NAMES から「企業名→証券コード」の辞書を作成。
+    部分一致・表記ゆれ（株式会社・HD等）も考慮。
+    """
+    from stock_data import JP_NAMES
+    mapping: dict[str, str] = {}
+
+    # JP_NAMES から登録
+    for code, name in JP_NAMES.items():
+        # フルネーム
+        mapping[name.lower()] = code
+        # 短縮形（「ホールディングス」→「HD」等）
+        short = (name.replace("ホールディングス", "HD")
+                     .replace("ホールディング",   "HD")
+                     .replace("フィナンシャルグループ", "FG")
+                     .replace("グループ", "G"))
+        mapping[short.lower()] = code
+        # さらに短い形（最初の単語だけ）
+        first = name.split("（")[0].split("・")[0]
+        if len(first) >= 2:
+            mapping[first.lower()] = code
+
+    # candidate_stocks のラベルからも追加
+    for code, label in get_candidates():
+        mapping[label.lower()] = code
+
+    return mapping
+
+
+def _resolve_code(raw: str) -> str:
+    """
+    入力文字列を証券コードに変換する。
+    数字4桁ならそのまま返す。
+    それ以外は名前として検索する。
+    """
+    raw = raw.strip()
+    # 数字のみ → そのままコードとして使う
+    if raw.isdigit():
+        return raw
+
+    # 企業名検索（完全一致 → 部分一致の順）
+    mapping = _build_name_to_code()
+    lower   = raw.lower()
+
+    # 完全一致
+    if lower in mapping:
+        return mapping[lower]
+
+    # 部分一致（最初にヒットしたもの）
+    for name_key, code in mapping.items():
+        if lower in name_key or name_key in lower:
+            return code
+
+    # 見つからなければ原文を返す（エラーは呼び出し側で処理）
+    return raw
 
 
 # ════════════════════════════════════════
@@ -48,70 +106,76 @@ from ui_components      import (
 # ════════════════════════════════════════
 def render_analysis_tab(is_ai: bool) -> None:
 
-    # ── 入力 ────────────────────────────────────────
-    st.markdown('<p class="sec-title">📊 証券コードを入力して分析</p>',
+    st.markdown('<p class="sec-title">📊 証券コードまたは企業名で検索</p>',
                 unsafe_allow_html=True)
 
     c_inp, c_btn = st.columns([3, 1])
     with c_inp:
-        code = st.text_input(
-            "証券コード",
-            placeholder="例: 9432（NTT）、8267（イオン）",
+        raw_input = st.text_input(
+            "検索",
+            placeholder="例: 9432 / KDDI / NTT / オリックス",
             label_visibility="collapsed",
         )
     with c_btn:
         btn = st.button("✨ 分析する", use_container_width=True)
 
-    # クイックボタン
+    # ⑦ クイックボタン: NTT・KDDIの2銘柄のみ
     st.caption("▶ まずは試してみよう")
-    quick = [
-        ("NTT",  "9432"), ("KDDI",  "9433"), ("イオン", "8267"),
-        ("JT",   "2914"), ("SMFG",  "8316"), ("OLC",   "4661"),
-    ]
-    cols = st.columns(len(quick))
-    for i, (lbl, qc) in enumerate(quick):
-        with cols[i]:
-            if st.button(f"🔖 {lbl}", key=f"q{qc}"):
-                code = qc
-                btn  = True
+    q_cols = st.columns(2)
+    with q_cols[0]:
+        if st.button("🔖 NTT（9432）", key="q9432", use_container_width=True):
+            raw_input = "9432"
+            btn = True
+    with q_cols[1]:
+        if st.button("🔖 KDDI（9433）", key="q9433", use_container_width=True):
+            raw_input = "9433"
+            btn = True
 
-    # ── 未入力 ──────────────────────────────────────
-    if not (btn and code):
+    # ── 未入力 ──────────────────────────────────
+    if not (btn and raw_input):
         st.markdown("""
 <div class="card" style="text-align:center;padding:2.2rem;opacity:0.75;">
     <div style="font-size:2.5rem;">🌸</div>
     <div style="font-size:1.0rem;font-weight:600;color:#c2185b;margin-top:0.7rem;">
-        証券コードを入力して「分析する」を押してください
+        証券コードまたは企業名を入力して「分析する」を押してください
     </div>
     <div style="font-size:0.83rem;color:#999;margin-top:0.3rem;">
-        上のボタンで人気銘柄をすぐに試せます
+        例: 9432 / KDDI / NTT / オリックス
     </div>
 </div>
 """, unsafe_allow_html=True)
         return
 
-    code = code.strip()
+    # ⑤ 企業名→コード変換
+    code = _resolve_code(raw_input)
 
-    # ── データ取得 ──────────────────────────────────
+    # 変換結果を表示（名前入力の場合）
+    if not raw_input.isdigit() and code != raw_input:
+        st.info(f"🔍 「{raw_input}」→ 証券コード **{code}** として検索します")
+
+    # ── データ取得 ──────────────────────────────
     with st.spinner("📡 データを取得中..."):
         df_raw = get_price_data(code)
         info   = get_stock_info(code)
 
     if df_raw is None or df_raw.empty:
-        st.error(f"⚠️ 「{code}」のデータが見つかりません。4桁のコードを確認してください。")
+        st.error(
+            f"⚠️ 「{raw_input}」のデータが見つかりません。\n"
+            "証券コード（4桁の数字）または正式な企業名で入力してください。"
+        )
         return
 
-    # ── 計算 ────────────────────────────────────────
+    # ── 計算 ────────────────────────────────────
     df   = add_indicators(df_raw)
     tv   = get_latest_values(df)
     sc   = calc_simple_score(info, tv, code)
-    name = get_display_name(info, code)   # ④ 日本語名優先
+    name = get_display_name(info, code)
     yi   = get_yutai(code)
 
     # ① 銘柄ヘッダー
     render_stock_header(name, code, tv, sc["total"])
 
-    # ❤️ ウォッチリストボタン（① 修正版）
+    # ❤️ ウォッチリストボタン（①フリーズ修正済み）
     dy_str = _fmt_div(info.get("dividendYield"))
     render_favorite_button(
         code=code, name=name,
@@ -120,18 +184,19 @@ def render_analysis_tab(is_ai: bool) -> None:
         score=sc["total"],
     )
 
-    # ② 基本指標
+    # ⑥ 基本データ（業種表示を含む）
     st.markdown('<p class="sec-title">📋 基本データ</p>', unsafe_allow_html=True)
+    _render_sector(info)   # ⑥ 業種
     render_metrics(info, tv)
 
-    # 株主優待情報
+    # ④ 株主優待情報（詳細版）
     st.markdown('<p class="sec-title">🎁 株主優待情報</p>', unsafe_allow_html=True)
-    _render_yutai(yi, tv)
+    _render_yutai_detail(yi, tv)
 
-    # 💰 配当シミュレーター（② 修正版）
-    render_dividend_simulator(info, tv.get("close", 0))
+    # ③ 配当推移グラフ
+    render_dividend_history(code)
 
-    # チャート（⑤ use_container_width）
+    # チャート
     st.markdown('<p class="sec-title">📈 株価チャート</p>', unsafe_allow_html=True)
     with st.spinner("チャートを描画中..."):
         buf = draw_candlestick(df, name)
@@ -158,29 +223,85 @@ def render_analysis_tab(is_ai: bool) -> None:
 
 
 # ────────────────────────────────────────
-# 株主優待カード
+# ⑥ 業種表示
 # ────────────────────────────────────────
-def _render_yutai(yi: dict, tv: dict) -> None:
+# セクター名の日本語マッピング
+_SECTOR_JP: dict[str, str] = {
+    "Technology"             : "テクノロジー",
+    "Communication Services" : "通信",
+    "Consumer Defensive"     : "生活必需品",
+    "Consumer Cyclical"      : "一般消費財",
+    "Healthcare"             : "ヘルスケア",
+    "Financial Services"     : "金融",
+    "Industrials"            : "産業・機械",
+    "Basic Materials"        : "素材・化学",
+    "Energy"                 : "エネルギー",
+    "Utilities"              : "公共・電力",
+    "Real Estate"            : "不動産",
+}
+
+def _render_sector(info: dict) -> None:
+    """業種（セクター）を1行バッジで表示"""
+    sector = info.get("sector", "") or info.get("sectorDisp", "")
+    indust = info.get("industry", "") or info.get("industryDisp", "")
+
+    if not sector and not indust:
+        return   # データなしは非表示
+
+    sector_jp = _SECTOR_JP.get(sector, sector)
+
+    badges = ""
+    if sector_jp:
+        badges += (
+            f"<span style='background:#e8eaf6;color:#3949ab;border-radius:50px;"
+            f"padding:0.2rem 0.8rem;font-size:0.82rem;font-weight:600;"
+            f"margin-right:0.4rem;'>🏭 {sector_jp}</span>"
+        )
+    if indust:
+        badges += (
+            f"<span style='background:#fce4ec;color:#c2185b;border-radius:50px;"
+            f"padding:0.2rem 0.8rem;font-size:0.82rem;font-weight:600;'>"
+            f"📂 {indust}</span>"
+        )
+
+    if badges:
+        st.markdown(
+            f"<div style='margin-bottom:0.7rem;'>{badges}</div>",
+            unsafe_allow_html=True)
+
+
+# ────────────────────────────────────────
+# ④ 株主優待詳細表示
+# ────────────────────────────────────────
+def _render_yutai_detail(yi: dict, tv: dict) -> None:
+    """株主優待情報を詳細表示（SBI証券風）"""
     close      = tv.get("close", 0)
     min_shares = yi.get("min_shares", 100)
     min_invest = close * min_shares
+    yutai_text = yi.get("yutai", "データなし")
+    kenri      = yi.get("kenri_month", "―")
+    long_hold  = yi.get("long_hold_bonus", "―")
+    notes      = yi.get("notes", "")
+    tiers      = yi.get("share_tiers", [])
 
+    has_yutai = ("なし" not in yutai_text and
+                 "データなし" not in yutai_text)
+
+    # 上段: 基本3カード
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(f"""
 <div class="m-card">
     <div class="m-label">🎁 優待内容</div>
     <div style="font-size:0.9rem;font-weight:600;color:#3d2b1f;
-                margin-top:0.3rem;line-height:1.5;">
-        {yi.get('yutai','データなし')}
-    </div>
+                margin-top:0.3rem;line-height:1.5;">{yutai_text}</div>
 </div>
 """, unsafe_allow_html=True)
     with c2:
         st.markdown(f"""
 <div class="m-card">
     <div class="m-label">📅 権利確定月</div>
-    <div class="m-value">{yi.get('kenri_month','―')}</div>
+    <div class="m-value">{kenri}</div>
     <div class="m-sub">この月末に保有でOK</div>
 </div>
 """, unsafe_allow_html=True)
@@ -188,10 +309,27 @@ def _render_yutai(yi: dict, tv: dict) -> None:
         st.markdown(f"""
 <div class="m-card">
     <div class="m-label">💰 最低投資金額</div>
-    <div class="m-value" style="font-size:1.15rem;">¥{min_invest:,.0f}</div>
+    <div class="m-value" style="font-size:1.1rem;">¥{min_invest:,.0f}</div>
     <div class="m-sub">{min_shares}株 × 現在株価</div>
 </div>
 """, unsafe_allow_html=True)
+
+    # 株数別優待・長期保有条件（データがある場合のみ）
+    if has_yutai and (tiers or (long_hold and long_hold not in ("なし", "―", ""))):
+        with st.expander("📋 株数別優待・長期保有条件を見る", expanded=False):
+
+            if tiers:
+                st.markdown("**株数別の優待内容**")
+                for t in tiers:
+                    st.markdown(
+                        f"- **{t['shares']:,}株以上**: {t['benefit']}"
+                    )
+
+            if long_hold and long_hold not in ("なし", "―", ""):
+                st.markdown(f"**🌟 長期保有優遇**: {long_hold}")
+
+            if notes:
+                st.caption(f"📌 {notes}")
 
 
 # ────────────────────────────────────────
@@ -282,7 +420,7 @@ def _fmt_div(dy) -> str:
 render_css()
 render_header()
 
-# ── モード切替 ──────────────────────────────
+# ── モード切替 ──────────────────────────
 st.markdown("#### 🎛️ 分析モードを選択")
 col_m, col_d = st.columns([2, 3])
 
@@ -300,12 +438,10 @@ with col_d:
 <div style="background:linear-gradient(135deg,#e8eaf6,#d1c4e9);
             border:2px solid #9c27b0;border-radius:12px;
             padding:0.6rem 1rem;font-weight:600;color:#6a1b9a;font-size:0.88rem;">
-    ✨ Gemini APIで詳細コメントを生成。
-    <code>.streamlit/secrets.toml</code> にAPIキーが必要です。
+    ✨ Gemini APIで詳細コメントを生成。<code>.streamlit/secrets.toml</code> にAPIキーが必要です。
 </div>
 """, unsafe_allow_html=True)
     else:
-        # ⑥ 緑バナーを削除 → シンプルなテキストのみ
         st.markdown(
             "<div style='padding-top:0.4rem;font-size:0.87rem;color:#555;'>"
             "🟢 APIキー不要・完全無料で動作します。</div>",
@@ -319,7 +455,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── タブ ────────────────────────────────────
+# ── タブ ────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔍 銘柄分析",
     "⭐ おすすめTOP10",
@@ -345,7 +481,7 @@ with tab5:
 
 st.markdown("""
 <div class="footer">
-    🌸 株主優待スクリーナー v5.0 ｜ データ: Yahoo Finance ｜ AI: Gemini 2.5 Flash Lite<br>
+    🌸 株主優待スクリーナー v7.0 ｜ データ: Yahoo Finance ｜ AI: Gemini 2.5 Flash Lite<br>
     ※ 投資判断はご自身の責任でお願いします。
 </div>
 """, unsafe_allow_html=True)
