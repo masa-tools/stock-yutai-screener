@@ -1,18 +1,21 @@
 """
-favorites.py  v7.0
+favorites.py  v8.0
 ==================
 ❤️ お気に入りウォッチリスト
 
-【v7.0 不具合修正①】
-  原因: render_favorite_button() で st.rerun() を呼ぶと、
-        銘柄分析タブ全体（yfinance取得・指標計算・チャート描画）が
-        再実行されてフリーズしていた。
+【v8.0 修正 ① 根本原因】
+  問題1: 分析画面が消える
+    → on_click コールバック後、Streamlit が再描画を行う際に
+      st.text_input の値がリセットされ、code が空になって
+      「未入力状態」に戻っていた。
+    → favorites.py 側の修正: on_click は維持。
+      app.py 側で session_state["current_code"] を保持して
+      再描画後も分析を継続する（app.py 参照）。
 
-  修正方針:
-    - st.rerun() を完全廃止
-    - st.button の on_click コールバックで状態変更のみ行う
-    - メッセージは st.empty() プレースホルダーで即時表示
-    - rerun なしでも session_state の変更は即反映される
+  問題2: ウォッチリストに保存されない
+    → _ensure_loaded() が毎描画サイクルで呼ばれると
+      session_state が上書きされるケースがあった。
+    → 初回フラグ "_fav_loaded" で確実に1回だけ読み込む。
 """
 
 import json
@@ -20,38 +23,47 @@ import os
 import streamlit as st
 
 FAVORITES_FILE = "favorites.json"
-_SS_KEY        = "fav_data"
+_SS_KEY    = "fav_data"
+_LOAD_FLAG = "_fav_loaded"   # 初回ロード済みフラグ
 
 
 # ────────────────────────────────
 # 内部: 読み書き
 # ────────────────────────────────
 def _ensure_loaded() -> None:
-    """初回のみファイルから session_state に読み込む"""
-    if _SS_KEY not in st.session_state:
-        data = []
-        try:
-            if os.path.exists(FAVORITES_FILE):
-                with open(FAVORITES_FILE, encoding="utf-8") as f:
-                    data = json.load(f)
-        except Exception:
-            pass
-        st.session_state[_SS_KEY] = data
+    """
+    セッション開始時に1回だけJSONから読み込む。
+    _LOAD_FLAG で「既に読んだ」かを管理することで
+    再描画ごとの上書きを防ぐ。
+    """
+    if st.session_state.get(_LOAD_FLAG):
+        return   # 既にロード済み
+
+    data = []
+    try:
+        if os.path.exists(FAVORITES_FILE):
+            with open(FAVORITES_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+    except Exception:
+        pass
+
+    st.session_state[_SS_KEY]    = data
+    st.session_state[_LOAD_FLAG] = True
 
 
 def _save(data: list[dict]) -> None:
-    """session_state を更新し、可能ならJSONにも書く"""
+    """session_state を更新し、可能なら JSON にも書く"""
     st.session_state[_SS_KEY] = data
     try:
         with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
-        pass  # Cloud環境など書き込み不可の場合は無視
+        pass   # Cloud 環境などで書き込み不可の場合は無視
 
 
 def _get() -> list[dict]:
     _ensure_loaded()
-    return list(st.session_state[_SS_KEY])
+    return list(st.session_state.get(_SS_KEY, []))
 
 
 # ────────────────────────────────
@@ -83,40 +95,38 @@ def get_favorites() -> list[dict]:
 
 
 # ────────────────────────────────
-# ❤️ 登録ボタン（フリーズ修正版）
+# ❤️ 登録ボタン
 # ────────────────────────────────
 def render_favorite_button(code: str, name: str, close: float,
                             dy_str: str, score: int) -> None:
     """
     ❤️ / 💔 トグルボタン。
 
-    【v7.0 修正ポイント】
-      st.rerun() を廃止。
-      on_click コールバックで状態変更のみ行い、
-      メッセージは st.empty() で即時表示する。
-      これにより銘柄分析タブ全体の再実行（フリーズ）を防ぐ。
+    【設計】
+      on_click コールバックで状態変更のみ行う（rerun なし）。
+      分析画面が消える問題は app.py 側の session_state["current_code"]
+      で解決する。このファイルは状態管理のみ担当。
     """
     _ensure_loaded()
+    already = is_favorite(code)
+    label   = "💔 ウォッチリストから削除" if already else "❤️ ウォッチリストに追加"
+    ph      = st.empty()
 
-    already  = is_favorite(code)
-    label    = "💔 ウォッチリストから削除" if already else "❤️ ウォッチリストに追加"
-    msg_key  = f"_fav_msg_{code}"
-    ph       = st.empty()   # メッセージ表示用プレースホルダー
-
-    # on_click で状態変更（rerun なし）
     def _on_click():
         if is_favorite(code):
             remove_favorite(code)
-            st.session_state[msg_key] = ("info", f"「{name}」をウォッチリストから削除しました")
+            st.session_state[f"_fmsg_{code}"] = ("info",
+                f"「{name}」をウォッチリストから削除しました")
         else:
             add_favorite(code, name, close, dy_str, score)
-            st.session_state[msg_key] = ("success", f"「{name}」を追加しました ❤️")
+            st.session_state[f"_fmsg_{code}"] = ("success",
+                f"「{name}」を追加しました ❤️")
 
     st.button(label, key=f"fav_btn_{code}", on_click=_on_click)
 
-    # メッセージがあれば表示（次の描画サイクルで自動消去）
-    if msg_key in st.session_state:
-        kind, msg = st.session_state.pop(msg_key)
+    mkey = f"_fmsg_{code}"
+    if mkey in st.session_state:
+        kind, msg = st.session_state.pop(mkey)
         if kind == "success":
             ph.success(msg)
         else:
@@ -161,8 +171,7 @@ def render_watchlist_tab() -> None:
         st.markdown(f'<p class="sec-title">登録銘柄 {count}件</p>',
                     unsafe_allow_html=True)
     with dc:
-        def _clear():
-            clear_favorites()
+        def _clear(): clear_favorites()
         st.button("🗑️ 全削除", key="wl_clear", on_click=_clear)
 
     for col, lbl in zip(
@@ -170,7 +179,6 @@ def render_watchlist_tab() -> None:
         ["銘柄名", "コード", "株価", "配当利回り", "スコア", ""],
     ):
         col.caption(lbl)
-
     st.markdown("<hr style='border:none;border-top:2px solid #fce4ec;'>",
                 unsafe_allow_html=True)
 
@@ -188,26 +196,34 @@ def _render_row(item: dict) -> None:
               else "linear-gradient(135deg,#f8bbd0,#f48fb1)" if score >= 50
               else "linear-gradient(135deg,#e0e0e0,#bdbdbd)")
 
-    c1, c2, c3, c4, c5, c6 = st.columns([3, 1, 2, 2, 2, 1])
-    c1.markdown(f"<div style='font-weight:700;color:#880e4f;padding-top:0.4rem;'>{name}</div>",
-                unsafe_allow_html=True)
-    c2.markdown(f"<div style='background:#fce4ec;color:#ad1457;border-radius:50px;"
-                f"padding:0.15rem 0.4rem;font-size:0.76rem;font-weight:600;"
-                f"text-align:center;margin-top:0.35rem;'>{code}</div>",
-                unsafe_allow_html=True)
-    c3.markdown(f"<div style='text-align:right;padding-top:0.4rem;"
-                f"font-weight:600;'>¥{close:,.0f}</div>", unsafe_allow_html=True)
-    c4.markdown(f"<div style='text-align:center;padding-top:0.4rem;"
-                f"font-weight:600;color:#e91e63;'>{dy_str}</div>", unsafe_allow_html=True)
-    c5.markdown(f"<div style='text-align:center;margin-top:0.25rem;'>"
-                f"<span style='background:{bg};color:#fff;border-radius:50px;"
-                f"padding:0.13rem 0.6rem;font-size:0.82rem;font-weight:700;'>"
-                f"{score}点</span></div>", unsafe_allow_html=True)
-
+    c1,c2,c3,c4,c5,c6 = st.columns([3,1,2,2,2,1])
+    c1.markdown(
+        f"<div style='font-weight:700;color:#880e4f;padding-top:0.4rem;'>{name}</div>",
+        unsafe_allow_html=True)
+    c2.markdown(
+        f"<div style='background:#fce4ec;color:#ad1457;border-radius:50px;"
+        f"padding:0.15rem 0.4rem;font-size:0.76rem;font-weight:600;"
+        f"text-align:center;margin-top:0.35rem;'>{code}</div>",
+        unsafe_allow_html=True)
+    c3.markdown(
+        f"<div style='text-align:right;padding-top:0.4rem;"
+        f"font-weight:600;'>¥{close:,.0f}</div>",
+        unsafe_allow_html=True)
+    c4.markdown(
+        f"<div style='text-align:center;padding-top:0.4rem;"
+        f"font-weight:600;color:#e91e63;'>{dy_str}</div>",
+        unsafe_allow_html=True)
+    c5.markdown(
+        f"<div style='text-align:center;margin-top:0.25rem;'>"
+        f"<span style='background:{bg};color:#fff;border-radius:50px;"
+        f"padding:0.13rem 0.6rem;font-size:0.82rem;font-weight:700;'>"
+        f"{score}点</span></div>",
+        unsafe_allow_html=True)
     with c6:
         def _del(c=code):
             remove_favorite(c)
         st.button("🗑️", key=f"wl_del_{code}", on_click=_del, help="削除")
 
-    st.markdown("<hr style='border:none;border-top:1px solid #fce4ec;margin:0.08rem 0;'>",
-                unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='border:none;border-top:1px solid #fce4ec;margin:0.08rem 0;'>",
+        unsafe_allow_html=True)
