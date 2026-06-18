@@ -18,6 +18,8 @@ buy_timing.py
 """
 
 import streamlit as st
+from scoring_config import (RSI_OVERSOLD, RSI_SLIGHTLY_OVERSOLD,
+                             RSI_OVERBOUGHT)
 
 
 def render_buy_timing(tv: dict, sc: dict, info: dict) -> None:
@@ -132,10 +134,10 @@ def _judge(tv: dict, sc: dict, info: dict) -> tuple[int, int, list, list]:
 
     # ── RSI評価（0〜15点） ───────────
     if rsi is not None:
-        if rsi <= 30:
+        if rsi <= RSI_OVERSOLD:
             points += 15
             reasons.append(f"RSI {rsi:.0f}：売られすぎ水準（押し目圏）")
-        elif rsi <= 40:
+        elif rsi <= RSI_SLIGHTLY_OVERSOLD:
             points += 12
             reasons.append(f"RSI {rsi:.0f}：やや売られすぎ、下値限定的")
         elif rsi <= 55:
@@ -143,7 +145,7 @@ def _judge(tv: dict, sc: dict, info: dict) -> tuple[int, int, list, list]:
             reasons.append(f"RSI {rsi:.0f}：過熱感なし・適正水準")
         elif rsi <= 65:
             points += 5
-        elif rsi <= 75:
+        elif rsi <= RSI_OVERBOUGHT:
             points += 2
             cautions.append(f"RSI {rsi:.0f}：やや過熱気味")
         else:
