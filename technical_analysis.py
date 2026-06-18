@@ -21,6 +21,7 @@ import matplotlib.patches as mpatches
 import mplfinance as mpf
 import streamlit as st
 from io import BytesIO
+from scoring_config import RSI_OVERSOLD, RSI_OVERBOUGHT
 
 
 # ════════════════════════════════
@@ -105,11 +106,11 @@ def get_latest_values(df: pd.DataFrame) -> dict:
 
     # ── RSI判定 ──────────────────
     if rsi:
-        if   rsi >= 75: rsi_note = f"RSI {rsi:.0f} — 買われすぎ注意 ⚠️"
-        elif rsi >= 65: rsi_note = f"RSI {rsi:.0f} — やや過熱感あり"
-        elif rsi <= 30: rsi_note = f"RSI {rsi:.0f} — 売られすぎ水準（反発期待も）"
-        elif rsi <= 40: rsi_note = f"RSI {rsi:.0f} — やや売られすぎ"
-        else          : rsi_note = f"RSI {rsi:.0f} — 適正水準 👍"
+        if   rsi >= RSI_OVERBOUGHT:        rsi_note = f"RSI {rsi:.0f} — 買われすぎ注意 ⚠️"
+        elif rsi >= RSI_NEUTRAL_HIGH:      rsi_note = f"RSI {rsi:.0f} — やや過熱感あり"
+        elif rsi <= RSI_OVERSOLD:          rsi_note = f"RSI {rsi:.0f} — 売られすぎ水準（反発期待も）"
+        elif rsi <= RSI_SLIGHTLY_OVERSOLD: rsi_note = f"RSI {rsi:.0f} — やや売られすぎ"
+        else:                              rsi_note = f"RSI {rsi:.0f} — 適正水準 👍"
     else:
         rsi_note = "RSI: 計算中"
 
@@ -297,13 +298,13 @@ def _make_comments(total: int, tv: dict, dy, per) -> list[str]:
 
     # RSI系コメント
     if rsi:
-        if rsi >= 70:
+        if rsi >= RSI_OVERBOUGHT:
             comments.append("短期的にはやや過熱感があります。")
-        elif rsi <= 35:
+        elif rsi <= RSI_OVERSOLD:
             comments.append("売られすぎ水準です。反発のタイミングに注目。")
         else:
             comments.append("過熱感はなく、落ち着いた水準です。")
-
+          
     # 配当コメント（安全な変換を使用）
     if dy is not None:
         try:
