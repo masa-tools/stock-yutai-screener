@@ -15,6 +15,8 @@ app.py  v8.0
 """
 
 import streamlit as st
+from scoring_config import (RSI_OVERSOLD, RSI_SLIGHTLY_OVERSOLD,
+                             RSI_OVERBOUGHT)
 
 st.set_page_config(
     page_title="株ラボ",   # ⑦
@@ -233,13 +235,13 @@ def _investment_judge(sc: dict, tv: dict, info: dict) -> dict:
     # --- RSI ---
     rsi = tv.get("rsi")
     if rsi:
-        if rsi <= 40:
+        if rsi <= RSI_SLIGHTLY_OVERSOLD:
             pts += 2; reasons.append(f"RSI {rsi:.0f}（売られすぎ・買い場の可能性）")
         elif rsi <= 60:
             pts += 1
-        elif rsi >= 75:
+        elif rsi >= RSI_OVERBOUGHT:
             cautions.append(f"RSI {rsi:.0f}（買われすぎ）")
-
+          
     # --- 移動平均線 ---
     close = tv.get("close", 0)
     ma25  = tv.get("ma25")
