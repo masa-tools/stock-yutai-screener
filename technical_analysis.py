@@ -23,6 +23,7 @@ import streamlit as st
 from io import BytesIO
 from scoring_config import (
     RSI_OVERSOLD,
+    RSI_SLIGHTLY_OVERSOLD,
     RSI_NEUTRAL_LOW,
     RSI_NEUTRAL_HIGH,
     RSI_OVERBOUGHT,
