@@ -464,13 +464,14 @@ def _render_card(rank: int, item: dict, medal: str) -> None:
     _, btn_col = st.columns([5, 1])
     with btn_col:
         label = "🔼 閉じる" if st.session_state[det_key] else "🔍 詳細"
-        if st.button(label, key=f"detbtn_{rank}_{code}"):
-            st.session_state[det_key] = not st.session_state[det_key]
-            st.rerun()
+
+        def _toggle_detail(k=det_key):
+            st.session_state[k] = not st.session_state[k]
+
+        st.button(label, key=f"detbtn_{rank}_{code}", on_click=_toggle_detail)
 
     if st.session_state[det_key]:
         _render_detail(item)
-
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
 
