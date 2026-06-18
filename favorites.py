@@ -58,8 +58,9 @@ def _save(data: list[dict]) -> None:
         with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
-        pass   # Cloud 環境などで書き込み不可の場合は無視
-
+        # Cloud環境など書き込み不可の場合はセッション内のみ保存
+        # ユーザーに永続化されない旨を通知する
+        st.session_state["_fav_save_warning"] = True
 
 def _get() -> list[dict]:
     _ensure_loaded()
@@ -138,6 +139,14 @@ def render_favorite_button(code: str, name: str, close: float,
 # ────────────────────────────────
 def render_watchlist_tab() -> None:
     _ensure_loaded()
+
+    # Cloud環境での保存失敗を通知
+    if st.session_state.pop("_fav_save_warning", False):
+        st.warning(
+            "⚠️ ウォッチリストはこのセッション中のみ有効です。"
+            "ページを閉じると登録内容が消える場合があります。",
+            icon="⚠️",
+        )
 
     st.markdown("""
 <div class="card" style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);
