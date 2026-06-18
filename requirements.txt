@@ -1,10 +1,9 @@
-# requirements.txt  v5.0
+# requirements.txt  v8.0
 # pip install -r requirements.txt
 streamlit>=1.32.0
 yfinance>=0.2.38
 pandas>=2.0.0
 numpy>=1.24.0
-ta>=0.11.0
 mplfinance>=0.12.10b0
 matplotlib>=3.7.0
 requests>=2.31.0
