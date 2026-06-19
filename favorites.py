@@ -21,6 +21,7 @@ favorites.py  v8.0
 import json
 import os
 import streamlit as st
+from stock_data import get_stock_info, fmt_dividend_str
 
 FAVORITES_FILE = "favorites.json"
 _SS_KEY    = "fav_data"
@@ -191,17 +192,31 @@ def render_watchlist_tab() -> None:
     st.markdown("<hr style='border:none;border-top:2px solid #fce4ec;'>",
                 unsafe_allow_html=True)
 
-    for item in get_favorites():
-        _render_row(item)
+for item in get_favorites():
+        code = item.get("code", "")
+        # リアルタイム株価・配当利回りを取得（失敗時はJSONの保存値を使用）
+        try:
+            live_info  = get_stock_info(code)
+            raw_close  = live_info.get("currentPrice") or live_info.get("regularMarketPrice")
+            live_close = float(raw_close) if raw_close else item.get("close", 0)
+            live_dy    = fmt_dividend_str(live_info.get("dividendYield"))
+            live_dy_str = live_dy if live_dy not in ("―", "無配当") else item.get("dy_str", "―")
+            # 無配当は登録時の値より正確なため live_dy を優先
+            if live_dy == "無配当":
+                live_dy_str = "無配当"
+        except Exception:
+            live_close  = item.get("close", 0)
+            live_dy_str = item.get("dy_str", "―")
+        _render_row(item, live_close, live_dy_str)
+  
 
-
-def _render_row(item: dict) -> None:
+def _render_row(item: dict, live_close: float, live_dy_str: str) -> None:
     code   = item.get("code", "")
     name   = item.get("name", code)
-    close  = item.get("close", 0)
-    dy_str = item.get("dy_str", "―")
+    close  = live_close
+    dy_str = live_dy_str
     score  = item.get("score", 0)
-    bg     = ("linear-gradient(135deg,#f48fb1,#ce93d8)" if score >= 70
+  bg     = ("linear-gradient(135deg,#f48fb1,#ce93d8)" if score >= 70
               else "linear-gradient(135deg,#f8bbd0,#f48fb1)" if score >= 50
               else "linear-gradient(135deg,#e0e0e0,#bdbdbd)")
 
