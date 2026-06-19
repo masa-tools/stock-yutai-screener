@@ -21,6 +21,7 @@ import matplotlib.patches as mpatches
 import mplfinance as mpf
 import streamlit as st
 from io import BytesIO
+from stock_data import safe_float, fmt_dividend_pct
 from scoring_config import (
     RSI_OVERSOLD,
     RSI_SLIGHTLY_OVERSOLD,
@@ -174,8 +175,8 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
 
     # ── ① 財務スコア（0〜25点） ────
     fin = 0
-    per = _nv(info, "trailingPE") or _nv(info, "forwardPE")
-    pbr = _nv(info, "priceToBook")
+    per = safe_float(info, "trailingPE") or safe_float(info, "forwardPE")
+    pbr = safe_float(info, "priceToBook")
 
     if per:
         if   10 <= per <= 20: fin += 13
@@ -195,7 +196,7 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
     # Fix: yfinanceは小数形式(0.035=3.5%)で返すが稀に%形式(3.5)で返す
     #      1.0超なら既に%形式と判定し30%超は異常値として除外
     div = 0
-    dy  = _nv(info, "dividendYield")
+    dy  = safe_float(info, "dividendYield")
     if dy is not None:
         raw_dy = float(info.get("dividendYield", 0) or 0)
         p = raw_dy * 100 if raw_dy <= 1.0 else raw_dy
@@ -246,10 +247,10 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
 
     # ── ⑤ ボーナス（0〜10点） ──────
     bonus = 5   # ベース点
-    oi = _nv(info, "operatingIncome") or _nv(info, "ebit")
+    oi = safe_float(info, "operatingIncome") or safe_float(info, "ebit")
     if oi and oi > 0:
         bonus += 3   # 黒字企業ボーナス
-    mc = _nv(info, "marketCap")
+    mc = safe_float(info, "marketCap")
     if mc and mc >= 1e11:
         bonus += 2   # 大型株ボーナス
 
@@ -262,14 +263,7 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
     # ── 評価マーク ─────────────────
     long_mark  = "◎" if total >= 72 else "○" if total >= 52 else "△"
     # 配当評価マーク（安全な変換を使用）
-    def _div_pct(raw):
-        if raw is None: return 0
-        try:
-            v = float(raw)
-            p = v * 100 if v <= 1.0 else v
-            return p if 0.1 <= p <= 30 else 0
-        except Exception: return 0
-    _dp = _div_pct(info.get("dividendYield"))
+    _dp = fmt_dividend_pct(info.get("dividendYield"))
     div_mark   = "◎" if _dp >= 3 else "○" if _dp >= 1.5 else "△"
     tech_mark  = "◎" if tech >= 22 else "○" if tech >= 14 else "△"
 
@@ -441,15 +435,6 @@ def _v(row, col: str) -> float | None:
     """DataFrame行から安全に数値を取り出す"""
     try:
         f = float(row[col])
-        return None if (np.isnan(f) or np.isinf(f)) else f
-    except Exception:
-        return None
-
-
-def _nv(d: dict, key: str) -> float | None:
-    """辞書から安全に数値を取り出す"""
-    try:
-        f = float(d.get(key))
         return None if (np.isnan(f) or np.isinf(f)) else f
     except Exception:
         return None
