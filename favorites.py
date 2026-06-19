@@ -192,7 +192,7 @@ def render_watchlist_tab() -> None:
     st.markdown("<hr style='border:none;border-top:2px solid #fce4ec;'>",
                 unsafe_allow_html=True)
 
-for item in get_favorites():
+    for item in get_favorites():
         code = item.get("code", "")
         # リアルタイム株価・配当利回りを取得（失敗時はJSONの保存値を使用）
         try:
@@ -216,7 +216,7 @@ def _render_row(item: dict, live_close: float, live_dy_str: str) -> None:
     close  = live_close
     dy_str = live_dy_str
     score  = item.get("score", 0)
-  bg     = ("linear-gradient(135deg,#f48fb1,#ce93d8)" if score >= 70
+    bg     = ("linear-gradient(135deg,#f48fb1,#ce93d8)" if score >= 70
               else "linear-gradient(135deg,#f8bbd0,#f48fb1)" if score >= 50
               else "linear-gradient(135deg,#e0e0e0,#bdbdbd)")
 
