@@ -29,6 +29,21 @@ DEFENSIVE_CODES = {
     "2914","2502","2503","9020","9022","9021",
 }
 
+# 業種フィルタ用：英語キー → 日本語表示名
+_SECTOR_JP_REC: dict[str, str] = {
+    "Technology"            : "テクノロジー",
+    "Communication Services": "通信",
+    "Consumer Defensive"    : "生活必需品",
+    "Consumer Cyclical"     : "一般消費財",
+    "Healthcare"            : "ヘルスケア",
+    "Financial Services"    : "金融",
+    "Industrials"           : "産業・機械",
+    "Basic Materials"       : "素材・化学",
+    "Energy"                : "エネルギー",
+    "Utilities"             : "公共・電力",
+    "Real Estate"           : "不動産",
+}
+
 
 # ════════════════════════════════════════
 # ⑦ キャッシュ付きデータ取得
@@ -83,11 +98,30 @@ def render_recommend_tab(is_ai: bool = False) -> None:
         st.error("データ取得に失敗しました。しばらくしてリロードしてください。")
         return
 
+    # フィルタUI（キャッシュ済み ranking を渡す・再スクリーニングなし）
+    filters  = _render_filter_ui(ranking)
+    filtered = _apply_filters(ranking, filters)
+
     st.markdown(
-        f'<p class="sec-title">🏆 今日のおすすめ TOP10'
+        f'<p class="sec-title">🏆 おすすめランキング'
         f'<span style="font-size:0.73rem;color:#aaa;font-weight:400;margin-left:0.5rem;">'
-        f'{today} ｜ {len(cands)}銘柄から選出</span></p>',
+        f'{today} ｜ '
+        f'表示件数：{min(10, len(filtered))}件 / 全{len(ranking)}件</span></p>',
         unsafe_allow_html=True)
+
+    medals = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
+
+    if not filtered:
+        st.info("🔍 条件に合う銘柄がありません。フィルタを緩めてみてください。")
+    else:
+        for rank, item in enumerate(filtered[:10], 1):
+            _render_card(rank, item, medals[rank - 1])
+
+    st.markdown("""
+<div class="disclaimer">
+    ⚠️ 自動スコアリングによる参考情報です。投資判断はご自身でお願いします。
+</div>
+""", unsafe_allow_html=True)
 
     medals = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
     for rank, item in enumerate(ranking[:10], 1):
@@ -98,6 +132,106 @@ def render_recommend_tab(is_ai: bool = False) -> None:
     ⚠️ 自動スコアリングによる参考情報です。投資判断はご自身でお願いします。
 </div>
 """, unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════
+# フィルタUI・フィルタ適用
+# ════════════════════════════════════════
+def _render_filter_ui(ranking: list[dict]) -> dict:
+    """
+    フィルタUIを描画し、選択された条件を辞書で返す。
+    ranking はキャッシュ済み全件リスト（業種リスト生成に使用）。
+    再スクリーニング・API呼び出しは行わない。
+    """
+    # 業種リストをキャッシュ済みrankingから動的生成（英語→日本語変換）
+    sector_keys = sorted({
+        item.get("sector", "")
+        for item in ranking
+        if item.get("sector", "")
+    })
+    sector_options = ["全業種"] + [
+        _SECTOR_JP_REC.get(s, s) for s in sector_keys
+    ]
+
+    with st.expander("🔽 絞り込みフィルタ", expanded=False):
+        fc1, fc2 = st.columns(2)
+        fc3, fc4 = st.columns(2)
+
+        with fc1:
+            min_dy = st.select_slider(
+                "💰 最低配当利回り",
+                options=[round(x * 0.5, 1) for x in range(0, 21)],
+                value=0.0,
+                format_func=lambda x: f"{x:.1f}%",
+                key="filter_min_dy",
+            )
+        with fc2:
+            min_score = st.select_slider(
+                "⭐ 最低総合スコア",
+                options=list(range(0, 101, 5)),
+                value=0,
+                format_func=lambda x: f"{x}点",
+                key="filter_min_score",
+            )
+        with fc3:
+            min_price = st.select_slider(
+                "💴 最低株価",
+                options=list(range(0, 10001, 500)),
+                value=0,
+                format_func=lambda x: f"¥{x:,}",
+                key="filter_min_price",
+            )
+        with fc4:
+            sector_sel = st.selectbox(
+                "🏭 業種",
+                options=sector_options,
+                index=0,
+                key="filter_sector",
+            )
+
+        if st.button("🔄 フィルタをリセット", key="filter_reset"):
+            for k in ("filter_min_dy", "filter_min_score",
+                      "filter_min_price", "filter_sector"):
+                st.session_state.pop(k, None)
+            st.rerun()
+
+    return {
+        "min_dy"   : min_dy,
+        "min_score": min_score,
+        "min_price": min_price,
+        "sector"   : sector_sel,
+    }
+
+
+def _apply_filters(ranking: list[dict], filters: dict) -> list[dict]:
+    """
+    キャッシュ済みのランキング結果にフィルタを適用して返す。
+    再スクリーニング・API呼び出しは行わない。
+    ランキング順位（スコア降順）は維持される。
+
+    sector 比較:
+      item["sector"] は英語（例: "Financial Services"）
+      filters["sector"] は日本語（selectboxの表示値）
+      → _SECTOR_JP_REC で英語→日本語に変換してから比較する
+    """
+    result = []
+    for item in ranking:
+        # ① 最低配当利回り
+        if item.get("dy_pct", 0) < filters["min_dy"]:
+            continue
+        # ② 最低総合スコア
+        if item.get("total", 0) < filters["min_score"]:
+            continue
+        # ③ 最低株価
+        if item.get("close", 0) < filters["min_price"]:
+            continue
+        # ④ 業種絞り込み（英語→日本語変換して比較）
+        if filters["sector"] != "全業種":
+            item_sector_jp = _SECTOR_JP_REC.get(item.get("sector", ""), "")
+            if item_sector_jp != filters["sector"]:
+                continue
+        result.append(item)
+    return result
 
 
 # ════════════════════════════════════════
@@ -144,6 +278,8 @@ def _run_screening(candidates: list[tuple[str,str]]) -> list[dict]:
                     "tv"     : tv,
                     "yi"     : yi,
                     "sc_simple": calc_simple_score(info, tv, code),
+                    # フィルタ用（英語のまま保存・_apply_filters内で日本語変換して比較）
+                    "sector" : info.get("sector", ""),
                 })
                 time.sleep(0.1)
             except Exception:
