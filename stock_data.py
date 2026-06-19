@@ -271,4 +271,4 @@ def fmt_dividend_str(dy) -> str:
         p = v * 100 if v <= 1.0 else v
         return f"{p:.2f}%" if 0.1 <= p <= 30 else "―"
     except (TypeError, ValueError):
-        return "―"    )
+        return "―"
