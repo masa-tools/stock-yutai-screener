@@ -20,7 +20,8 @@ import streamlit as st
 import time
 from datetime import datetime
 
-from stock_data         import get_price_data, get_stock_info, get_display_name, JP_NAMES
+from stock_data         import (get_price_data, get_stock_info, get_display_name,
+                                JP_NAMES, safe_float, fmt_dividend_pct)
 from yutai_data         import get_yutai
 
 from candidate_stocks import get_candidates as _get_candidates
@@ -120,16 +121,8 @@ def _score(info: dict, code: str) -> tuple[float, float, float, float, str]:
     """配当スコアを計算して (スコア, 利回り%, 配当性向%, 財務点, コメント) を返す"""
 
     # 配当利回り
-    dy_raw = info.get("dividendYield")
-    dy_pct = 0.0
-    if dy_raw is not None:
-        try:
-            v = float(dy_raw)
-            p = v * 100 if v <= 1.0 else v
-            dy_pct = p if 0.1 <= p <= 30 else 0
-        except Exception:
-            pass
-
+    dy_pct = fmt_dividend_pct(info.get("dividendYield"))
+  
     # 配当性向
     pr = info.get("payoutRatio")
     payout = 0.0
@@ -156,9 +149,9 @@ def _score(info: dict, code: str) -> tuple[float, float, float, float, str]:
     else                    : po_sc = 5
 
     # ── 財務健全性スコア（20点） ────
-    oi  = _nv(info, "operatingIncome") or _nv(info, "ebit")
-    pbr = _nv(info, "priceToBook")
-    mc  = _nv(info, "marketCap")
+    oi  = safe_float(info, "operatingIncome") or safe_float(info, "ebit")
+    pbr = safe_float(info, "priceToBook")
+    mc  = safe_float(info, "marketCap")
     fin = 0.0
     if oi and oi > 0          : fin += 8
     if pbr and pbr <= 2.0     : fin += 6
@@ -186,10 +179,10 @@ def _longterm_score(code: str, info: dict) -> float:
     infra_codes = {"9432","9433","9434","8591","8316","8058","2914"}
     if code in infra_codes:
         score += 10
-    mc = _nv(info, "marketCap")
+    mc = safe_float(info, "marketCap")
     if mc and mc >= 1e12: score += 6
     elif mc and mc >= 1e11: score += 4
-    roe = _nv(info, "returnOnEquity")
+    roe = safe_float(info, "returnOnEquity")
     if roe and roe >= 0.10: score += 4
     elif roe and roe >= 0.05: score += 2
     return min(20, score)
@@ -270,14 +263,3 @@ def _render_row(rank_icon, item: dict) -> None:
 
     st.markdown("<hr style='border:none;border-top:1px solid #e3f2fd;margin:0.2rem 0;'>",
                 unsafe_allow_html=True)
-
-
-def _nv(d: dict, key: str):
-    import numpy as np
-    v = d.get(key)
-    if v is None: return None
-    try:
-        f = float(v)
-        return None if (np.isnan(f) or np.isinf(f)) else f
-    except Exception:
-        return None
