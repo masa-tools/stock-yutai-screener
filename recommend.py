@@ -16,7 +16,9 @@ import numpy as np
 import time
 from datetime import datetime
 
-from stock_data         import get_price_data, get_stock_info, get_display_name, JP_NAMES
+from stock_data         import (get_price_data, get_stock_info, get_display_name,
+                                JP_NAMES, safe_float, fmt_dividend_pct,
+                                fmt_dividend_str, fmt_num, fmt_yen)
 from technical_analysis import add_indicators, get_latest_values, calc_simple_score, draw_candlestick
 from yutai_data         import get_yutai, yutai_score
 from candidate_stocks   import get_candidates
@@ -121,7 +123,7 @@ def _run_screening(candidates: list[tuple[str,str]]) -> list[dict]:
                 yi   = get_yutai(code)
                 name = get_display_name(info, code)
                 sc   = _calc_scores(info, tv, code)
-                dy   = _div_pct(info.get("dividendYield"))
+                dy   = fmt_dividend_pct(info.get("dividendYield"))
 
                 results.append({
                     "code"   : code,
@@ -130,7 +132,7 @@ def _run_screening(candidates: list[tuple[str,str]]) -> list[dict]:
                     "total"  : sc["total"],
                     "close"  : tv.get("close", 0),
                     "trend"  : tv.get("trend", "―"),
-                    "dy_str" : _fmt_div(info.get("dividendYield")),
+                    "dy_str" : fmt_dividend_str(info.get("dividendYield")),
                     "dy_pct" : dy,
                     "yutai"  : yi.get("yutai", "―"),
                     "kenri"  : yi.get("kenri_month", "―"),
@@ -172,7 +174,7 @@ def _exclude(info: dict, df: pd.DataFrame) -> bool:
             return True
     except ValueError:
         pass
-    dy = _div_pct(info.get("dividendYield"))
+    dy = fmt_dividend_pct(info.get("dividendYield"))
     return dy == 0 or dy > 8.0
 
 
@@ -192,27 +194,27 @@ def _calc_scores(info: dict, tv: dict, code: str) -> dict:
 
 def _s_finance(info: dict) -> float:
     s = 0.0
-    oi = _nv(info,"operatingIncome") or _nv(info,"ebit")
+    oi = safe_float(info,"operatingIncome") or safe_float(info,"ebit")
     if oi and oi > 0: s += 8
-    roe = _nv(info,"returnOnEquity")
+    roe = safe_float(info,"returnOnEquity")
     if roe is not None:
         if   roe >= 0.15: s += 7
         elif roe >= 0.10: s += 5
         elif roe >= 0.05: s += 3
         elif roe >= 0   : s += 1
-    per = _nv(info,"trailingPE") or _nv(info,"forwardPE")
+    per = safe_float(info,"trailingPE") or safe_float(info,"forwardPE")
     if per and per > 0:
         if   10 <= per <= 18: s += 7
         elif 18 <  per <= 25: s += 5
         elif  7 <= per < 10 : s += 4
         elif per < 7         : s += 2
         else                 : s += 1
-    pbr = _nv(info,"priceToBook")
+    pbr = safe_float(info,"priceToBook")
     if pbr is not None:
         if   0.5 <= pbr <= 2.0: s += 5
         elif 2.0 <  pbr <= 3.0: s += 3
         else                   : s += 1
-    om = _nv(info,"operatingMargins")
+    om = safe_float(info,"operatingMargins")
     if om is not None:
         if   om >= 0.15: s += 3
         elif om >= 0.08: s += 2
@@ -222,7 +224,7 @@ def _s_finance(info: dict) -> float:
 
 def _s_dividend(info: dict) -> float:
     s  = 0.0
-    dy = _div_pct(info.get("dividendYield"))
+    dy = fmt_dividend_pct(info.get("dividendYield"))
     if   3.5 <= dy <= 5.0: s += 15
     elif 3.0 <= dy < 3.5 : s += 13
     elif 5.0 < dy <= 6.5 : s += 10
@@ -236,7 +238,7 @@ def _s_dividend(info: dict) -> float:
         elif 20 <= pp < 30 : s += 4
         elif 70 < pp <= 85 : s += 2
         elif pp > 0         : s += 3
-        oi = _nv(info,"operatingIncome") or _nv(info,"ebit")
+        oi = safe_float(info,"operatingIncome") or safe_float(info,"ebit")
         if oi and oi > 0 and pp < 55: s += 3
     except (TypeError, ValueError):
         pass
@@ -246,15 +248,15 @@ def _s_dividend(info: dict) -> float:
 def _s_longterm(code: str, info: dict) -> float:
     s = 3.0
     if code in DEFENSIVE_CODES: s += 8
-    mc = _nv(info,"marketCap")
+    mc = safe_float(info,"marketCap")
     if mc:
         if   mc >= 5e12: s += 7
         elif mc >= 1e12: s += 6
         elif mc >= 5e11: s += 4
         elif mc >= 1e11: s += 2
         else           : s += 1
-    roe = _nv(info,"returnOnEquity")
-    pm  = _nv(info,"profitMargins")
+    roe = safe_float(info,"returnOnEquity")
+    pm  = safe_float(info,"profitMargins")
     if roe and roe >= 0.08: s += 2
     if pm  and pm  >= 0.10: s += 2
     return min(20.0, s)
@@ -298,11 +300,11 @@ def _make_bullets(sc: dict, info: dict, tv: dict, yi: dict, code: str) -> list[s
     bullets: list[str] = []
 
     # 財務
-    roe = _nv(info,"returnOnEquity")
-    pbr = _nv(info,"priceToBook")
-    per = _nv(info,"trailingPE") or _nv(info,"forwardPE")
-    om  = _nv(info,"operatingMargins")
-    eq  = _nv(info,"debtToEquity")   # 負債比率（低いほど健全）
+    roe = safe_float(info,"returnOnEquity")
+    pbr = safe_float(info,"priceToBook")
+    per = safe_float(info,"trailingPE") or safe_float(info,"forwardPE")
+    om  = safe_float(info,"operatingMargins")
+    eq  = safe_float(info,"debtToEquity")   # 負債比率（低いほど健全）
 
     if roe and roe >= 0.10:
         bullets.append(f"ROE {roe*100:.1f}%（高い資本効率・稼ぐ力が強い）")
@@ -316,7 +318,7 @@ def _make_bullets(sc: dict, info: dict, tv: dict, yi: dict, code: str) -> list[s
         bullets.append(f"財務健全（負債比率 {eq:.0f}%以下・自己資本比率が高い）")
 
     # 配当
-    dy  = _div_pct(info.get("dividendYield"))
+    dy  = fmt_dividend_pct(info.get("dividendYield"))
     try:
         pp = float(info.get("payoutRatio",0) or 0) * 100
         if dy >= 3.0 and 20 <= pp <= 60:
@@ -485,8 +487,8 @@ def _render_detail(item: dict) -> None:
     code     = item["code"]
     close    = item["close"]
 
-    from stock_data import fmt_num, fmt_yen
-
+# fmt_num, fmt_yen はファイル先頭のimportに移動済みのため削除
+  
     st.markdown("""
 <div style="background:#fdf8f5;border:1px solid #f8bbd0;border-radius:14px;
             padding:1rem 1.2rem;margin:0.3rem 0 0.5rem;">
@@ -507,7 +509,7 @@ def _render_detail(item: dict) -> None:
         col.metric(lbl, val)
 
     _m(c1, "現在株価",    f"¥{close:,.0f}")
-    _m(c2, "配当利回り",  _fmt_div(dy))
+    _m(c2, "配当利回り",  fmt_dividend_str(dy))
     _m(c3, "PER",        fmt_num(per,1,"倍") if per else "―")
     _m(c4, "PBR",        fmt_num(pbr,2,"倍") if pbr else "―")
 
@@ -566,25 +568,3 @@ def _score_bars(scores: dict) -> None:
         )
     bars += "</div>"
     st.markdown(bars, unsafe_allow_html=True)
-
-
-def _fmt_div(dy) -> str:
-    if dy is None: return "無配当"
-    try:
-        v = float(dy); p = v * 100 if v <= 1.0 else v
-        return f"{p:.2f}%" if 0.1 <= p <= 30 else "―"
-    except (TypeError, ValueError): return "―"
-
-def _div_pct(dy) -> float:
-    try:
-        v = float(dy); p = v * 100 if v <= 1.0 else v
-        return p if 0.1 <= p <= 30 else 0.0
-    except (TypeError, ValueError): return 0.0
-
-def _nv(d: dict, key: str):
-    v = d.get(key)
-    if v is None: return None
-    try:
-        f = float(v)
-        return None if (np.isnan(f) or np.isinf(f)) else f
-    except (TypeError, ValueError): return None
