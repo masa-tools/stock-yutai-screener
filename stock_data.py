@@ -206,7 +206,27 @@ def fmt_num(val, decimals: int = 2, suffix: str = "") -> str:
 
 
 def get_display_name(info: dict, code: str) -> str:
-  def safe_float(d: dict, key: str) -> float | None:
+    """
+    銘柄名を返す。JP_NAMESを優先して日本語名を返す。
+
+    優先順:
+      1. JP_NAMES（日本語マスター）
+      2. yfinanceの longName / shortName
+      3. コード番号
+    """
+    # ① 日本語マスターから取得（最優先）
+    jp = JP_NAMES.get(code)
+    if jp:
+        return jp
+    # ② yfinanceから取得
+    return (
+        info.get("longName") or
+        info.get("shortName") or
+        f"銘柄コード {code}"
+    )
+
+
+def safe_float(d: dict, key: str) -> float | None:
     """
     辞書から安全に数値を取り出す（旧 _nv）。
     None・NaN・Inf はすべて None を返す。
@@ -251,22 +271,4 @@ def fmt_dividend_str(dy) -> str:
         p = v * 100 if v <= 1.0 else v
         return f"{p:.2f}%" if 0.1 <= p <= 30 else "―"
     except (TypeError, ValueError):
-        return "―"
-    """
-    銘柄名を返す。JP_NAMESを優先して日本語名を返す。
-
-    優先順:
-      1. JP_NAMES（日本語マスター）
-      2. yfinanceの longName / shortName
-      3. コード番号
-    """
-    # ① 日本語マスターから取得（最優先）
-    jp = JP_NAMES.get(code)
-    if jp:
-        return jp
-    # ② yfinanceから取得
-    return (
-        info.get("longName") or
-        info.get("shortName") or
-        f"銘柄コード {code}"
-    )
+        return "―"    )
