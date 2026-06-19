@@ -206,6 +206,52 @@ def fmt_num(val, decimals: int = 2, suffix: str = "") -> str:
 
 
 def get_display_name(info: dict, code: str) -> str:
+  def safe_float(d: dict, key: str) -> float | None:
+    """
+    辞書から安全に数値を取り出す（旧 _nv）。
+    None・NaN・Inf はすべて None を返す。
+    recommend.py / technical_analysis.py / dividend_ranking.py 共通で使用。
+    """
+    v = d.get(key)
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return None if (np.isnan(f) or np.isinf(f)) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def fmt_dividend_pct(dy) -> float:
+    """
+    yfinance の dividendYield を % に変換して返す（旧 _div_pct）。
+    - yfinance は 0.03 形式（小数）と 3.0 形式（%）が混在するため正規化する
+    - 変換後が 0.1〜30 の範囲外（異常値）は 0.0 を返す
+    - None・変換失敗時は 0.0 を返す（フォールバック）
+    """
+    try:
+        v = float(dy)
+        p = v * 100 if v <= 1.0 else v
+        return p if 0.1 <= p <= 30 else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def fmt_dividend_str(dy) -> str:
+    """
+    yfinance の dividendYield を表示用文字列に変換して返す（旧 _fmt_div）。
+    - 有効値: "3.50%" 形式で返す
+    - 無配当（None）: "無配当" を返す
+    - 異常値・変換失敗: "―" を返す
+    """
+    if dy is None:
+        return "無配当"
+    try:
+        v = float(dy)
+        p = v * 100 if v <= 1.0 else v
+        return f"{p:.2f}%" if 0.1 <= p <= 30 else "―"
+    except (TypeError, ValueError):
+        return "―"
     """
     銘柄名を返す。JP_NAMESを優先して日本語名を返す。
 
