@@ -224,12 +224,17 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
         else                           : tech += 1
 
     # RSI（最大10点）
+    # 閾値設計: calc_simple_score専用のスコアリング配点閾値
+    #   RSI_NEUTRAL_HIGH(65)は共通定数を使用
+    #   35/45/70はスコアリング精度のための独自閾値（scoring_configに未定義のため残置）
     if rsi:
-        if   45 <= rsi <= 65: tech += 10
-        elif 35 <= rsi < 45 : tech += 7
-        elif 65 < rsi <= 70 : tech += 5
-        elif rsi < 35       : tech += 3
-        else                : tech += 1
+        if   45 <= rsi <= RSI_NEUTRAL_HIGH: tech += 10
+        elif 35 <= rsi < 45               : tech += 7   # 35: スコアリング専用閾値
+        elif RSI_NEUTRAL_HIGH < rsi <= 70 : tech += 5   # 70: スコアリング専用閾値
+        elif rsi < 35                     : tech += 3   # 35: スコアリング専用閾値
+        else                              : tech += 1
+
+3. Import双方向整合性確認
 
     # MACD（最大8点）
     if macd is not None and macd_s is not None:
