@@ -884,19 +884,6 @@ def render_compare_section() -> None:
             _render_compare_table(results)
 
 
-# ────────────────────────────────────────
-# ユーティリティ
-# ────────────────────────────────────────
-    if dy is None:
-        return "無配当"
-    try:
-        v = float(dy)
-        p = v * 100 if v <= 1.0 else v
-        return f"{p:.2f}%" if 0.1 <= p <= 30 else "―"
-    except (TypeError, ValueError):
-        return "―"
-
-
 # ════════════════════════════════════════
 # メイン
 # ════════════════════════════════════════
