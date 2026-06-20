@@ -17,9 +17,9 @@ buy_timing.py
   総合スコア:  0〜5点（高スコアで高得点）
 """
 
-import streamlit as st
 from scoring_config import (RSI_OVERSOLD, RSI_SLIGHTLY_OVERSOLD,
-                             RSI_OVERBOUGHT)
+                             RSI_NEUTRAL_LOW, RSI_NEUTRAL_HIGH, RSI_OVERBOUGHT)
+from stock_data import fmt_dividend_pct
 
 
 def render_buy_timing(tv: dict, sc: dict, info: dict) -> None:
@@ -121,16 +121,8 @@ def _judge(tv: dict, sc: dict, info: dict) -> tuple[int, int, list, list]:
     vol_r   = tv.get("vol_ratio", 1.0)
     total_s = sc.get("total", 50)
 
-    # 配当利回りの安全な変換
-    dy_raw  = info.get("dividendYield")
-    dy_pct  = 0.0
-    if dy_raw is not None:
-        try:
-            v = float(dy_raw)
-            p = v * 100 if v <= 1.0 else v
-            dy_pct = p if 0.1 <= p <= 30 else 0
-        except (TypeError, ValueError):
-            pass
+    # 配当利回りの安全な変換（stock_data.fmt_dividend_pct に統一）
+    dy_pct = fmt_dividend_pct(info.get("dividendYield"))
 
     # ── RSI評価（0〜15点） ───────────
     if rsi is not None:
@@ -140,10 +132,10 @@ def _judge(tv: dict, sc: dict, info: dict) -> tuple[int, int, list, list]:
         elif rsi <= RSI_SLIGHTLY_OVERSOLD:
             points += 12
             reasons.append(f"RSI {rsi:.0f}：やや売られすぎ、下値限定的")
-        elif rsi <= 55:
+        elif rsi <= RSI_NEUTRAL_LOW:
             points += 8
             reasons.append(f"RSI {rsi:.0f}：過熱感なし・適正水準")
-        elif rsi <= 65:
+        elif rsi <= RSI_NEUTRAL_HIGH:
             points += 5
         elif rsi <= RSI_OVERBOUGHT:
             points += 2
