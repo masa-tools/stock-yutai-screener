@@ -18,7 +18,6 @@ buy_timing.py
 """
 
 import streamlit as st
-
 from scoring_config import (RSI_OVERSOLD, RSI_SLIGHTLY_OVERSOLD,
                              RSI_NEUTRAL_LOW, RSI_NEUTRAL_HIGH, RSI_OVERBOUGHT)
 from stock_data import fmt_dividend_pct
