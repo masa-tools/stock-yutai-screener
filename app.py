@@ -25,7 +25,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-from stock_data         import get_price_data, get_stock_info, get_display_name, JP_NAMES
+from stock_data         import (get_price_data, get_stock_info, get_display_name,
+                                JP_NAMES, fmt_dividend_pct, fmt_dividend_str)
 from technical_analysis import (add_indicators, get_latest_values,
                                 calc_simple_score, draw_candlestick)
 from yutai_data         import get_yutai
@@ -362,7 +363,7 @@ def render_analysis_tab(is_ai: bool) -> None:
     render_stock_header(name, code, tv, sc["total"])
 
     # ❤️ ウォッチリストボタン（① 修正済み favorites.py 使用）
-    dy_str = _fmt_div(info.get("dividendYield"))
+    dy_str = fmt_dividend_str(info.get("dividendYield"))
     render_favorite_button(
         code=code, name=name,
         close=tv.get("close", 0),
@@ -685,8 +686,8 @@ def _fetch_compare_data(code: str) -> dict:
         jd   = _investment_judge(sc, tv, info)
 
         close      = tv.get("close", 0)
-        dy_pct     = _fmt_div_pct(info.get("dividendYield"))
-        dy_str     = _fmt_div(info.get("dividendYield"))
+        dy_pct     = fmt_dividend_pct(info.get("dividendYield"))
+        dy_str     = fmt_dividend_str(info.get("dividendYield"))
         yutai_val  = yi.get("yutai_value", 0)
         min_shares = yi.get("min_shares", 100)
         invest     = close * min_shares if close > 0 else 0
@@ -739,7 +740,6 @@ def _fetch_compare_data(code: str) -> dict:
         return {"error": True, "code": code}
 
 
-def _fmt_div_pct(dy) -> float:
     """配当利回りをfloatで返す（比較機能内部用）"""
     try:
         v = float(dy)
@@ -887,7 +887,6 @@ def render_compare_section() -> None:
 # ────────────────────────────────────────
 # ユーティリティ
 # ────────────────────────────────────────
-def _fmt_div(dy) -> str:
     if dy is None:
         return "無配当"
     try:
