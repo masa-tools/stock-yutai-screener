@@ -24,6 +24,7 @@ Gemini 2.5 Flash Lite を使ったAI分析コメント生成
 import streamlit as st
 import requests
 import json
+from stock_data import fmt_dividend_pct, fmt_dividend_str
 
 MODEL   = "gemini-2.5-flash-lite-preview-06-17"
 API_URL = (
@@ -127,9 +128,9 @@ def _build_prompt(name, code, score, info, tv, yutai) -> str:
 
     per = info.get("trailingPE") or info.get("forwardPE")
     pbr = info.get("priceToBook")
-    # Fix① プロンプト内でも安全な変換を使用
-    dy_s = _safe_div_str(info.get("dividendYield"))
-
+    # Fix① stock_data.fmt_dividend_str に統一
+    dy_s = fmt_dividend_str(info.get("dividendYield"))
+  
     return f"""あなたは日本株の長期投資アドバイザーです。
 投資初心者（20〜30代女性）に向けて、やさしく正直な分析を行ってください。
 
@@ -203,8 +204,8 @@ def _fallback(name, score, tv, info, code, yutai) -> dict:
     """APIキー未設定・エラー時のフォールバック"""
     total = score.get("total", 50)
     dy    = info.get("dividendYield")
-    # Fix③ フォールバック内でも安全な変換を使用
-    dy_pct = _safe_div_pct(dy)
+    # Fix③ stock_data.fmt_dividend_pct に統一（0.0フォールバック・動作同一）
+    dy_pct = fmt_dividend_pct(dy)
     trend = tv.get("trend", "")
     rsi   = tv.get("rsi")
 
@@ -251,27 +252,5 @@ def _fallback(name, score, tv, info, code, yutai) -> dict:
 # ────────────────────────────────
 # 内部ユーティリティ
 # ────────────────────────────────
-def _safe_div_str(dy) -> str:
-    """配当利回りを安全にパーセント文字列へ変換（recommend.pyと同じロジック）"""
-    if dy is None:
-        return "無配当"
-    try:
-        val = float(dy)
-        pct = val * 100 if val <= 1.0 else val
-        if pct < 0.1 or pct > 30:
-            return "―"
-        return f"{pct:.2f}%"
-    except (TypeError, ValueError):
-        return "―"
-
-
-def _safe_div_pct(dy) -> float | None:
-    """配当利回りをfloat（パーセント値）で返す。異常値はNone"""
-    if dy is None:
-        return None
-    try:
-        val = float(dy)
-        pct = val * 100 if val <= 1.0 else val
-        return pct if 0.1 <= pct <= 30 else None
-    except (TypeError, ValueError):
-        return None
+# _safe_div_str / _safe_div_pct は stock_data.fmt_dividend_str /
+# fmt_dividend_pct に統一済み（P2-1対応）。このセクションは削除。
