@@ -234,8 +234,6 @@ def calc_simple_score(info: dict, tv: dict, code: str) -> dict:
         elif rsi < 35                     : tech += 3   # 35: スコアリング専用閾値
         else                              : tech += 1
 
-3. Import双方向整合性確認
-
     # MACD（最大8点）
     if macd is not None and macd_s is not None:
         tech += 8 if macd > macd_s else 2
