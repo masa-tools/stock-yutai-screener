@@ -740,15 +740,6 @@ def _fetch_compare_data(code: str) -> dict:
         return {"error": True, "code": code}
 
 
-    """配当利回りをfloatで返す（比較機能内部用）"""
-    try:
-        v = float(dy)
-        p = v * 100 if v <= 1.0 else v
-        return p if 0.1 <= p <= 30 else 0.0
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def _render_compare_table(items: list[dict]) -> None:
     """
     比較テーブルを描画する。
