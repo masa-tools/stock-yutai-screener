@@ -124,14 +124,6 @@ def render_recommend_tab(is_ai: bool = False) -> None:
 """, unsafe_allow_html=True)
 
     medals = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    for rank, item in enumerate(ranking[:10], 1):
-        _render_card(rank, item, medals[rank - 1])
-
-    st.markdown("""
-<div class="disclaimer">
-    ⚠️ 自動スコアリングによる参考情報です。投資判断はご自身でお願いします。
-</div>
-""", unsafe_allow_html=True)
 
 
 # ════════════════════════════════════════
