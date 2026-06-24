@@ -221,14 +221,9 @@ def _render_sector(info: dict) -> None:
 # ────────────────────────────────────────
 def _render_total_yield(info: dict, yi: dict, close: float) -> None:
     """配当利回り + 優待利回り = 総合利回り を表示"""
-    dy_raw = info.get("dividendYield")
-    try:
-        val    = float(dy_raw)
-        dy_pct = val * 100 if val <= 1.0 else val
-        if dy_pct < 0.1 or dy_pct > 30:
-            dy_pct = 0.0
-    except Exception:
-        dy_pct = 0.0
+    # P2-1残件解消: fmt_dividend_pct に統一
+    dy_pct = fmt_dividend_pct(info.get("dividendYield"))
+
 
     yutai_val   = yi.get("yutai_value", 0)
     min_shares  = yi.get("min_shares", 100)
