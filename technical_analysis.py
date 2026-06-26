@@ -17,6 +17,9 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # サーバー環境ではGUI不要
 import matplotlib.pyplot as plt
+
+plt.rcParams["font.family"] = "IPAGothic"
+plt.rcParams["axes.unicode_minus"] = False
 import matplotlib.patches as mpatches
 import mplfinance as mpf
 import streamlit as st
