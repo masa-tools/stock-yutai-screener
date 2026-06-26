@@ -15,6 +15,9 @@ app.py  v8.0
 """
 
 import streamlit as st
+
+# matplotlib系は最後寄り
+import japanize_matplotlib
 from investment_judge   import _investment_judge
 
 st.set_page_config(
