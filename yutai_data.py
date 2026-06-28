@@ -1,5 +1,5 @@
 """
-yutai_data.py  v7.0
+yutai_data.py  v8.0
 ====================
 株主優待マスターデータ（④詳細表示対応版）
 
@@ -7,6 +7,10 @@ yutai_data.py  v7.0
   long_hold_bonus: 長期保有優遇内容
   share_tiers    : 株数別優待内容リスト
   notes          : 補足・注意事項
+
+【v8.0 P3-2 Phase1追加】
+  フォールバック3月固定だった67銘柄の権利確定月を登録
+  yutai="調査中" で最小構成。Phase2で優待内容を拡充予定。
 """
 
 YUTAI_DATA: dict[str, dict] = {
@@ -279,59 +283,678 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "3年以上でグレードアップ",
         "notes"          : "",
     },
-  KENRI_MAP = {
-    "1821": "3月",  "1929": "3月",  "1941": "3月",  "1944": "3月",
-    "1945": "3月",  "1951": "3月",  "2207": "3月",  "2208": "3月",
-    "2216": "12月", "2411": "3月",  "2432": "3月",  "2492": "9月",
-    "2659": "2月",  "2698": "2月",  "2768": "3月",  "2910": "3月",
-    "2936": "3月",  "3048": "8月",  "3240": "1月・7月", "3283": "2月・8月",
-    "3333": "3月",  "3577": "3月",  "3659": "12月", "3697": "8月",
-    "3865": "3月",  "3994": "11月", "4041": "3月",  "4091": "3月",
-    "4151": "12月", "4159": "3月",  "4206": "3月",  "4217": "3月",
-    "4462": "3月",  "4471": "3月",  "4480": "12月", "4506": "3月",
-    "4512": "3月",  "4541": "3月",  "4549": "3月",  "4555": "3月",
-    "4560": "12月", "4563": "12月", "4566": "12月", "4812": "3月",
-    "6146": "6月",  "6674": "3月",  "6724": "3月",  "6727": "3月",
-    "6740": "3月",  "6745": "3月",  "6753": "3月",  "6770": "3月",
-    "6794": "3月",  "6807": "3月",  "7282": "3月",  "7296": "3月",
-    "7312": "3月",  "7315": "3月",  "7321": "3月",  "8016": "2月",
-    "8025": "3月",  "8036": "3月",  "8242": "3月",  "8248": "3月",
-    "8951": "2月・8月", "9024": "3月", "9025": "3月",
-}
 
-# 追加ブロックを生成
-lines = []
-lines.append("")
-lines.append("    # ══ Phase1追加（P3-2）: 権利確定月のみ登録。優待内容はPhase2で拡充予定 ══")
-for code in sorted(KENRI_MAP.keys()):
-    month = KENRI_MAP[code]
-    lines.append(f"    # Phase2で優待内容を拡充予定")
-    lines.append(f'    "{code}": {{')
-    lines.append(f'        "yutai"          : "調査中",')
-    lines.append(f'        "kenri_month"    : "{month}",')
-    lines.append(f'        "min_shares"     : 100,')
-    lines.append(f'        "yutai_value"    : 0,')
-    lines.append(f'        "share_tiers"    : [],')
-    lines.append(f'        "long_hold_bonus": "なし",')
-    lines.append(f'        "notes"          : "",')
-    lines.append(f'    }},')
-
-insert_block = "\n".join(lines)
-
-with open("/home/claude/yutai_data_p32.py") as f:
-    content = f.read()
-
-# YUTAI_DATA の閉じ括弧直前に挿入
-old = "\n}\n\n\ndef get_yutai"
-new = insert_block + "\n}\n\n\ndef get_yutai"
-result = content.replace(old, new, 1)
-
-if result == content:
-    print("ERROR: 挿入位置が見つかりませんでした")
-else:
-    with open("/home/claude/yutai_data_p32.py", "w") as f:
-        f.write(result)
-    print("追加完了")
+    # ══ Phase1追加（P3-2）: 権利確定月のみ登録。優待内容はPhase2で拡充予定 ══
+    # Phase2で優待内容を拡充予定
+    "1821": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "1929": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "1941": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "1944": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "1945": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "1951": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2207": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2208": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2216": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "12月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2411": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2432": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2492": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "9月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2659": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "2月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2698": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "2月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2768": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2910": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "2936": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3048": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "8月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3240": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "1月・7月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3283": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "2月・8月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3333": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3577": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3659": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "12月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3697": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "8月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3865": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "3994": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "11月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4041": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4091": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4151": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "12月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4159": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4206": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4217": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4462": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4471": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4480": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "12月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4506": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4512": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4541": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4549": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4555": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4560": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "12月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4563": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "12月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4566": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "12月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "4812": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6146": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "6月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6674": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6724": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6727": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6740": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6745": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6753": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6770": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6794": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "6807": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "7282": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "7296": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "7312": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "7315": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "7321": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "8016": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "2月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "8025": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "8036": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "8242": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "8248": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "8951": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "2月・8月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "9024": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
+    # Phase2で優待内容を拡充予定
+    "9025": {
+        "yutai"          : "調査中",
+        "kenri_month"    : "3月",
+        "min_shares"     : 100,
+        "yutai_value"    : 0,
+        "share_tiers"    : [],
+        "long_hold_bonus": "なし",
+        "notes"          : "",
+    },
 }
 
 
