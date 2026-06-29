@@ -12,7 +12,6 @@ technical_analysis.py
   - 簡易スコアリング（API不要・Python只）
 """
 
-import os
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -22,9 +21,8 @@ import matplotlib.patches as mpatches
 import matplotlib.font_manager as fm  # P5-1: フォント強制ロード用
 import mplfinance as mpf
 import streamlit as st
+import os
 from io import BytesIO
-
-# ★重要: 読み込み順序のズレによるエラーを防ぐため、元のインポート位置を最優先に固定します
 from stock_data import safe_float, fmt_dividend_pct
 from scoring_config import (
     RSI_OVERSOLD,
@@ -33,26 +31,6 @@ from scoring_config import (
     RSI_NEUTRAL_HIGH,
     RSI_OVERBOUGHT,
 )
-
-# ══════════════════════════════════════════════════════════════════════════
-# 【P5-1】日本語フォントのセットアップ（OS・インフラ非依存方式）
-# ══════════════════════════════════════════════════════════════════════════
-# 同一ディレクトリに配置した NotoSansJP-Regular.ttf を最優先で読み込みます
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FONT_PATH = os.path.join(BASE_DIR, "NotoSansJP-Regular.ttf")
-
-if os.path.exists(FONT_PATH):
-    # フォントマネージャーに直接登録し、最優先フォントとして設定
-    fm.fontManager.addfont(FONT_PATH)
-    font_prop = fm.FontProperties(fname=FONT_PATH)
-    FONT_NAME = font_prop.get_name()
-    plt.rcParams["font.family"] = FONT_NAME
-else:
-    # 万が一フォントファイルが無い場合の安全な代替フォールバック名
-    FONT_NAME = "IPAGothic"
-    plt.rcParams["font.family"] = FONT_NAME
-
-plt.rcParams["axes.unicode_minus"] = False
 
 # ════════════════════════════════
 # テクニカル指標の計算
@@ -190,6 +168,24 @@ def draw_candlestick(df: pd.DataFrame, name: str) -> BytesIO:
     if plot_df.empty:
         return None
 
+    # ───【P5-1】フォント読み込みをこの描画処理の中だけで完結させます ───
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    FONT_PATH = os.path.join(BASE_DIR, "NotoSansJP-Regular.ttf")
+
+    if os.path.exists(FONT_PATH):
+        try:
+            fm.fontManager.addfont(FONT_PATH)
+            font_prop = fm.FontProperties(fname=FONT_PATH)
+            FONT_NAME = font_prop.get_name()
+        except:
+            FONT_NAME = "IPAGothic"
+    else:
+        FONT_NAME = "IPAGothic"
+
+    plt.rcParams["font.family"] = FONT_NAME
+    plt.rcParams["axes.unicode_minus"] = False
+    # ──────────────────────────────────────────────────────────────────
+
     # パステル風カスタムカラー設定
     COLORS = {
         "bg": "#ffffff",
@@ -235,7 +231,7 @@ def draw_candlestick(df: pd.DataFrame, name: str) -> BytesIO:
         )
 
         # ──────────────────────────────────────────────────────────────────
-        # 【P5-1】mplfinance描画直後に、各Axesのテキストフォントを強制上書き
+        # 各Axesのテキストフォントを強制上書き
         # ──────────────────────────────────────────────────────────────────
         
         # ① メインタイトルの個別上書き指定
@@ -254,16 +250,14 @@ def draw_candlestick(df: pd.DataFrame, name: str) -> BytesIO:
                              fontsize=9, framealpha=0.9,
                              facecolor="#fff9fb", edgecolor="#f8bbd0")
         
-        # 凡例内のテキストを1つずつループ処理でフォント上書き
+        # 凡例内のテキストをフォント上書き
         for text in leg.get_texts():
             text.set_fontname(FONT_NAME)
 
         # ③ 各軸（価格軸、日付軸、出来高軸）の目盛りテキストを強制適用
         for ax in axes:
-            # 軸の目盛りラベル
             for label in ax.get_xticklabels() + ax.get_yticklabels():
                 label.set_fontname(FONT_NAME)
-            # 軸自体のラベルテキスト
             ax.xaxis.label.set_fontname(FONT_NAME)
             ax.yaxis.label.set_fontname(FONT_NAME)
 
@@ -278,7 +272,6 @@ def draw_candlestick(df: pd.DataFrame, name: str) -> BytesIO:
 
     except Exception as e:
         st.warning(f"チャート描画エラー: {e}")
-        # 万が一のエラー時の安全なフォールバック処理
         try:
             plt.close()
         except:
