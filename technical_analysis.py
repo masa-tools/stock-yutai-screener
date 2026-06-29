@@ -32,6 +32,7 @@ font_prop = fm.FontProperties(fname=FONT_PATH)
 plt.rcParams["font.family"] = font_prop.get_name()
 plt.rcParams["axes.unicode_minus"] = False
 
+import matplotlib.patches as mpatches
 import mplfinance as mpf
 import streamlit as st
 from io import BytesIO
