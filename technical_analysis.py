@@ -16,8 +16,9 @@ import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # サーバー環境ではGUI不要
-import matplotlib.pyplot as plt
+import matplotlib as mpl
 import matplotlib.font_manager as fm
+import matplotlib.pyplot as plt
 import os
 
 FONT_PATH = os.path.join(
@@ -26,12 +27,12 @@ FONT_PATH = os.path.join(
 )
 
 fm.fontManager.addfont(FONT_PATH)
+mpl.font_manager._load_fontmanager(try_read_cache=False)
 
 font_prop = fm.FontProperties(fname=FONT_PATH)
 
 plt.rcParams["font.family"] = font_prop.get_name()
 plt.rcParams["axes.unicode_minus"] = False
-
 import matplotlib.patches as mpatches
 import mplfinance as mpf
 import streamlit as st
