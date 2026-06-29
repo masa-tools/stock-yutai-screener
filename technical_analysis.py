@@ -13,7 +13,7 @@ technical_analysis.py
 """
 
 import os
-import pandas as pd
+import pandas as pd  # ★重要: これが抜け落ちていたためエラーになっていました。追加しました。
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # サーバー環境ではGUI不要
