@@ -13,7 +13,7 @@ technical_analysis.py
 """
 
 import os
-import pandas as pd  # ★重要: これが抜け落ちていたためエラーになっていました。追加しました。
+import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # サーバー環境ではGUI不要
@@ -23,6 +23,8 @@ import matplotlib.font_manager as fm  # P5-1: フォント強制ロード用
 import mplfinance as mpf
 import streamlit as st
 from io import BytesIO
+
+# ★重要: 読み込み順序のズレによるエラーを防ぐため、元のインポート位置を最優先に固定します
 from stock_data import safe_float, fmt_dividend_pct
 from scoring_config import (
     RSI_OVERSOLD,
