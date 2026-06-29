@@ -17,9 +17,6 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # サーバー環境ではGUI不要
 import matplotlib.pyplot as plt
-
-plt.rcParams["font.family"] = "IPAGothic"
-plt.rcParams["axes.unicode_minus"] = False
 import matplotlib.patches as mpatches
 import mplfinance as mpf
 import streamlit as st
@@ -408,9 +405,18 @@ def draw_candlestick(df: pd.DataFrame, name: str = "") -> BytesIO | None:
             warn_too_much_data=500,
         )
 
+    for label in axes[0].get_xticklabels():
+          label.set_fontname("Noto Sans CJK JP")
+
+    for label in axes[0].get_yticklabels():
+         label.set_fontname("Noto Sans CJK JP")
         axes[0].set_title(
             f"📈  {name}  ローソク足チャート（直近6ヶ月）",
-            fontsize=12, fontweight="bold", color="#3d2b1f", pad=10,
+            fontsize=12,
+            fontweight="bold",
+            color="#3d2b1f",
+            pad=10,
+            fontname="Noto Sans CJK JP"
         )
 
         # 凡例
@@ -418,9 +424,17 @@ def draw_candlestick(df: pd.DataFrame, name: str = "") -> BytesIO | None:
             mpatches.Patch(color=COLORS["ma25"], label="25日移動平均"),
             mpatches.Patch(color=COLORS["ma75"], label="75日移動平均"),
         ]
-        axes[0].legend(handles=handles, loc="upper left",
-                       fontsize=9, framealpha=0.9,
-                       facecolor="#fff9fb", edgecolor="#f8bbd0")
+        leg = axes[0].legend(
+            handles=handles,
+            loc="upper left",
+            fontsize=9,
+            framealpha=0.9,
+            facecolor="#fff9fb",
+            edgecolor="#f8bbd0"
+        )
+
+    for text in leg.get_texts():
+        text.set_fontname("Noto Sans CJK JP")
 
         buf = BytesIO()
         fig.savefig(buf, format="png", dpi=108,
