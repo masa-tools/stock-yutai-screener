@@ -17,10 +17,21 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # サーバー環境ではGUI不要
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import os
 
-plt.rcParams["font.family"] = "IPAGothic"
+FONT_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "NotoSansJP-VariableFont_wght.ttf"
+)
+
+fm.fontManager.addfont(FONT_PATH)
+
+font_prop = fm.FontProperties(fname=FONT_PATH)
+
+plt.rcParams["font.family"] = font_prop.get_name()
 plt.rcParams["axes.unicode_minus"] = False
-import matplotlib.patches as mpatches
+
 import mplfinance as mpf
 import streamlit as st
 from io import BytesIO
