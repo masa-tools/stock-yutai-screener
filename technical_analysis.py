@@ -26,8 +26,7 @@ FONT_PATH = os.path.join(
     "NotoSansJP-VariableFont_wght.ttf"
 )
 
-mpl.font_manager._load_fontmanager(try_read_cache=False)
-
+fm.fontManager.addfont(FONT_PATH)
 font_prop = fm.FontProperties(fname=FONT_PATH)
 
 plt.rcParams["font.family"] = font_prop.get_name()
