@@ -16,7 +16,6 @@ import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # サーバー環境ではGUI不要
-import matplotlib as mpl
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import os
