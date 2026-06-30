@@ -345,37 +345,47 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み（権利月を3月→3月・9月に訂正）
     "2207": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "3月",
+        "yutai"          : "自社グループ商品詰め合わせ（お菓子）",
+        "kenri_month"    : "3月・9月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
+        "yutai_value"    : 1500,
+        "share_tiers"    : [
+            {"shares": 100,  "benefit": "自社グループ商品 1,500円相当（9月）"},
+            {"shares": 200,  "benefit": "自社グループ商品 2,000円相当（3月・9月）"},
+        ],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "アルファベットチョコレート等で知られる菓子メーカー。2021年に200株以上の株主への3月優待を新設し年2回化",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み（権利月を3月→9月に訂正・要再確認）
     "2208": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "3月",
+        "yutai"          : "自社グループ商品詰め合わせ（菓子・飲料・食品等）",
+        "kenri_month"    : "9月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
-        "long_hold_bonus": "なし",
-        "notes"          : "",
+        "yutai_value"    : 1200,
+        "share_tiers"    : [
+            {"shares": 100,  "benefit": "商品詰め合わせ 1,200円相当（6ヶ月以上保有）"},
+            {"shares": 200,  "benefit": "商品詰め合わせ 3,000円相当"},
+            {"shares": 1000, "benefit": "詰め合わせ3,000円+オンラインクーポン3,000円"},
+        ],
+        "long_hold_bonus": "3年以上継続保有で優待価額が200〜1,000円相当増額",
+        "notes"          : "アルフォート・ルマンド等で有名な菓子メーカー。6ヶ月以上の継続保有が条件。3月権利の有無は要再確認",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み（権利月12月→6月に訂正）
     "2216": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "12月",
+        "yutai"          : "クオカード（1,000円分）",
+        "kenri_month"    : "6月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
+        "yutai_value"    : 1000,
+        "share_tiers"    : [
+            {"shares": 100,  "benefit": "クオカード 1,000円分"},
+            {"shares": 1000, "benefit": "クオカード+プレミアム優待倶楽部ポイント（四半期毎）"},
+        ],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "カンロ飴・ピュレグミ等の菓子メーカー。権利確定は6月末（Phase1の12月から訂正）",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み
     "2411": {
         "yutai"          : "調査中",
         "kenri_month"    : "3月",
@@ -383,17 +393,20 @@ YUTAI_DATA: dict[str, dict] = {
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "ゲンダイエージェンシーは小規模・情報量が少なく優待制度の有無を確認できず。次回再調査が必要",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み（権利月を3月→9月に訂正）
     "2432": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "3月",
+        "yutai"          : "川崎ブレイブサンダース観戦チケット引換証・横浜DeNAベイスターズ関連クーポン",
+        "kenri_month"    : "9月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
+        "yutai_value"    : 3900,
+        "share_tiers"    : [
+            {"shares": 100, "benefit": "観戦チケット引換証1枚+ファンクラブクーポン+グッズ10%オフ+施設入館券"},
+            {"shares": 300, "benefit": "観戦チケット引換証3枚+ファンクラブクーポン3,000円オフ+グッズ10%オフ+施設入館券"},
+        ],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "横浜DeNAベイスターズ・川崎ブレイブサンダースのオーナー企業。権利確定は9月末（Phase1の3月から訂正）",
     },
     # Phase2で優待内容を拡充予定
     "2492": {
@@ -405,25 +418,34 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み
     "2659": {
-        "yutai"          : "調査中",
+        "yutai"          : "自社商品券・VJAギフトカード（2,000円相当〜）",
         "kenri_month"    : "2月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
+        "yutai_value"    : 2000,
+        "share_tiers"    : [
+            {"shares": 200,  "benefit": "商品券 2,000円相当"},
+            {"shares": 500,  "benefit": "商品券 3,000円相当"},
+            {"shares": 1000, "benefit": "商品券 5,000円相当"},
+        ],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "沖縄県在住者は自社商品券、県外は三井住友VJAギフトカード。優待は200株以上から",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み
     "2698": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "2月",
+        "yutai"          : "自社店舗優待券（100円＋税相当・2,000円〜）",
+        "kenri_month"    : "2月・8月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
-        "long_hold_bonus": "なし",
-        "notes"          : "",
+        "yutai_value"    : 2000,
+        "share_tiers"    : [
+            {"shares": 100,  "benefit": "優待券20枚（2,000円相当）"},
+            {"shares": 300,  "benefit": "優待券40枚（4,000円相当）"},
+            {"shares": 500,  "benefit": "優待券60枚（6,000円相当）"},
+            {"shares": 1000, "benefit": "優待券100枚（10,000円相当）"},
+        ],
+        "long_hold_bonus": "3年以上継続保有（300株以上）で優待券追加進呈",
+        "notes"          : "100円ショップキャンドゥの店舗で使える優待券。権利確定日は8月末",
     },
     # Phase2で優待内容を拡充予定
     "2768": {
@@ -435,65 +457,68 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み（権利月3月→4月・10月に訂正）
     "2910": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "3月",
+        "yutai"          : "自社店舗お惣菜券",
+        "kenri_month"    : "4月・10月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
-        "long_hold_bonus": "なし",
-        "notes"          : "",
+        "yutai_value"    : 2000,
+        "share_tiers"    : [
+            {"shares": 100,  "benefit": "おそうざい券1,000円分（年2回・合計2,000円）"},
+            {"shares": 1000, "benefit": "おそうざい券10,000円分（年2回・合計20,000円・5年未満）"},
+        ],
+        "long_hold_bonus": "5年以上の継続保有で優待額が変動",
+        "notes"          : "RF1等のデパ地下サラダ店を展開。年2回（4月末・10月末）権利確定。近隣店舗がない場合は電子クーポンに交換可",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み（重要：コード重複の可能性あり）
     "2936": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "3月",
+        "yutai"          : "自社サービス優待クーポン（1,500円相当）",
+        "kenri_month"    : "2月・8月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
+        "yutai_value"    : 1500,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "【要確認】Web検索結果ではコード2936は「ベースフード」として表示され、candidate_stocks.py記載の「すぎたホールディングス」と一致しない。2025年1月に優待制度新設。コード対応関係の確認が必要",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み
     "3048": {
-        "yutai"          : "調査中",
+        "yutai"          : "グループ店舗優待買物割引券（1,000円相当〜）",
         "kenri_month"    : "8月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
+        "yutai_value"    : 1000,
         "share_tiers"    : [],
-        "long_hold_bonus": "なし",
-        "notes"          : "",
+        "long_hold_bonus": "1年以上かつ200株以上、または3年以上かつ500株以上でカタログギフトを追加贈呈",
+        "notes"          : "ビックカメラ・コジマ・ソフマップ等グループ店舗及び通販で利用可。年2回権利確定（2月・8月）",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み
     "3240": {
-        "yutai"          : "調査中",
+        "yutai"          : "なし（REITのため制度上対象外）",
         "kenri_month"    : "1月・7月",
         "min_shares"     : 100,
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "野村不動産マスターファンド投資法人。REITのため一般的に株主優待制度を実施しない",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み
     "3283": {
-        "yutai"          : "調査中",
+        "yutai"          : "なし（REITのため制度上対象外）",
         "kenri_month"    : "2月・8月",
         "min_shares"     : 100,
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "日本プロロジスリート投資法人。物流施設特化型REIT。REITのため一般的に株主優待制度を実施しない",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み
     "3333": {
-        "yutai"          : "調査中",
+        "yutai"          : "なし（優待制度廃止）",
         "kenri_month"    : "3月",
         "min_shares"     : 100,
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "2023年2月権利分をもって株主優待制度を廃止済み",
     },
     # Phase2で優待内容を拡充予定
     "3577": {
@@ -505,15 +530,15 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み
     "3659": {
-        "yutai"          : "調査中",
+        "yutai"          : "なし",
         "kenri_month"    : "12月",
         "min_shares"     : 100,
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "Yahoo!ファイナンス・kabuyutai.com双方で優待制度の実施情報なしと確認。オンラインゲーム大手",
     },
     # Phase2で優待内容を拡充予定
     "3697": {
@@ -775,15 +800,15 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み
     "6745": {
-        "yutai"          : "調査中",
+        "yutai"          : "なし",
         "kenri_month"    : "3月",
         "min_shares"     : 100,
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "Yahoo!ファイナンスで「株主優待情報はありません」と明記。火災報知機・消火設備大手メーカー",
     },
     # Phase2で優待内容を拡充予定
     "6753": {
@@ -875,25 +900,28 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み
     "8016": {
-        "yutai"          : "調査中",
+        "yutai"          : "自社ECサイト割引クーポン（20%割引）・ギフトカタログ",
         "kenri_month"    : "2月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
-        "long_hold_bonus": "なし",
-        "notes"          : "",
+        "yutai_value"    : 1000,
+        "share_tiers"    : [
+            {"shares": 100,  "benefit": "ECサイト20%割引クーポン（6回分）"},
+            {"shares": 1000, "benefit": "クーポン+ギフトカタログ3,000円相当（1年以上保有）"},
+        ],
+        "long_hold_bonus": "1年以上保有でギフトカタログ進呈・3年以上でさらに増額",
+        "notes"          : "ECサイト「オンワード・クローゼット」で使える割引クーポン。権利確定は2月末",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み（一部未確認）
     "8025": {
-        "yutai"          : "調査中",
+        "yutai"          : "自社特別企画品（詳細調査中）",
         "kenri_month"    : "3月",
         "min_shares"     : 100,
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "優待制度自体は存在するが金額・内容の詳細出典が不十分。次回追加調査が必要",
     },
     # Phase2で優待内容を拡充予定
     "8036": {
@@ -905,15 +933,15 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み
     "8242": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "3月",
+        "yutai"          : "株主優待券（自社グループ百貨店・食品スーパー等で利用可）",
+        "kenri_month"    : "3月・9月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
+        "yutai_value"    : 1000,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "阪急阪神百貨店等グループ店舗で利用可能な優待券。年2回（3月・9月）権利確定",
     },
     # Phase2で優待内容を拡充予定
     "8248": {
@@ -925,25 +953,29 @@ YUTAI_DATA: dict[str, dict] = {
         "long_hold_bonus": "なし",
         "notes"          : "",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループB調査済み
     "8951": {
-        "yutai"          : "調査中",
+        "yutai"          : "なし（REITのため制度上対象外）",
         "kenri_month"    : "2月・8月",
         "min_shares"     : 100,
         "yutai_value"    : 0,
         "share_tiers"    : [],
         "long_hold_bonus": "なし",
-        "notes"          : "",
+        "notes"          : "J-REIT最古参の一つ。REITは投資法人のため一般的に株主優待制度を実施しない",
     },
-    # Phase2で優待内容を拡充予定
+    # P3-2 Phase2 グループA調査済み
     "9024": {
-        "yutai"          : "調査中",
-        "kenri_month"    : "3月",
+        "yutai"          : "株主優待乗車証（西武線・西武バス全線片道きっぷ）",
+        "kenri_month"    : "3月・9月",
         "min_shares"     : 100,
-        "yutai_value"    : 0,
-        "share_tiers"    : [],
-        "long_hold_bonus": "なし",
-        "notes"          : "",
+        "yutai_value"    : 320,
+        "share_tiers"    : [
+            {"shares": 100,   "benefit": "片道きっぷ2枚（3月のみ）"},
+            {"shares": 1000,  "benefit": "片道きっぷ10枚"},
+            {"shares": 10000, "benefit": "電車全線パス1枚"},
+        ],
+        "long_hold_bonus": "3年以上継続保有（3,000株以上）で片道きっぷ5枚追加",
+        "notes"          : "西武鉄道・西武バス全線で利用可能な乗車証。施設利用優待券（レストラン・ゴルフ割引等）も付帯",
     },
     # Phase2で優待内容を拡充予定
     "9025": {
