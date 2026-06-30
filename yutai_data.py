@@ -483,7 +483,7 @@ YUTAI_DATA: dict[str, dict] = {
     # P3-2 Phase2 グループA調査済み
     "3048": {
         "yutai"          : "グループ店舗優待買物割引券（1,000円相当〜）",
-        "kenri_month"    : "8月",
+        "kenri_month"    : "2月・8月",
         "min_shares"     : 100,
         "yutai_value"    : 1000,
         "share_tiers"    : [],
