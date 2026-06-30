@@ -388,7 +388,6 @@ def draw_candlestick(df: pd.DataFrame, name: str = "") -> BytesIO | None:
             marketcolors=mc,
             rc={
                 "font.family"      : font_prop.get_name(),
-              
                 "axes.facecolor"   : COLORS["bg"],
                 "figure.facecolor" : COLORS["bg"],
                 "savefig.facecolor": COLORS["bg"],
