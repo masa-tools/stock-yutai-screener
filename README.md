@@ -61,6 +61,31 @@ GEMINI_API_KEY = "AIzaSy..."
 
 ---
 
+## ⚙️ 依存ライブラリのバージョンについて
+
+requirements.txt は Streamlit Cloud 本番環境での動作確認済みバージョンに
+固定しています（`==` 指定）。アップデートする場合は、以下の手順を踏んでください。
+
+1. `requirements.txt` の対象パッケージのバージョンを更新し、GitHubにpush
+2. Streamlit Cloud で再デプロイし、デプロイログで実際にインストールされた
+   バージョンを確認する（ローカル環境がないため、`pip freeze` の代わりに
+   Streamlit Cloud の「Manage app」画面のログで確認する）
+3. 全5タブ（銘柄分析・おすすめTOP10・ウォッチリスト・カレンダー・
+   増配ランキング）が正常に動作することを確認
+4. 特にチャート描画（mplfinance/matplotlib）は過去に
+   バージョンアップで破損した実績があるため重点確認すること
+   （`base_mpf_style="white"` が廃止された事例あり）
+5. `yfinance` はメジャーバージョンアップ（0.x→1.x等）を跨ぐ場合、
+   `ticker.info` 等の返却データ構造が変わる可能性があるため、
+   銘柄分析・おすすめTOP10のデータ取得を重点確認すること
+6. 問題なければ本番運用を継続。問題が出た場合は直前のバージョンに戻す
+
+※ ローカル開発環境を持たない運用のため、`pip freeze` によるバージョン
+確認はできません。バージョン確認は必ず Streamlit Cloud のデプロイログ
+（`Successfully installed ...` の行）で行ってください。
+
+---
+
 ## v8.0 変更内容
 
 | # | 修正内容 |
@@ -81,8 +106,8 @@ GEMINI_API_KEY = "AIzaSy..."
 | 現象 | 対処 |
 |------|------|
 | HTMLタグが文字表示 | `find . -name __pycache__ -exec rm -rf {} +` → 再起動 |
-| チャートエラー | `pip install --upgrade mplfinance` |
-| データが取れない | `pip install --upgrade yfinance` |
+| チャートエラー | requirements.txtのmplfinanceバージョンを確認（安易にupgradeしない） |
+| データが取れない | requirements.txtのyfinanceバージョンを確認（安易にupgradeしない） |
 | Gemini 429エラー | 1〜2分待つか簡易モードに切替 |
 
 ---

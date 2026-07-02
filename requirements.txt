@@ -1,9 +1,20 @@
-# requirements.txt  v8.0
+# requirements.txt  v8.1
 # pip install -r requirements.txt
-streamlit>=1.32.0
-yfinance>=0.2.38
-pandas>=2.0.0
-numpy>=1.24.0
-mplfinance>=0.12.10b0
-matplotlib>=3.7.0
-requests>=2.31.0
+#
+# 【バージョン固定について】
+# Streamlit Cloud本番環境のデプロイログ（2026-07-02実測）に基づき固定。
+# 過去にmplfinanceのアップデートでbase_mpf_style="white"が廃止され
+# チャート描画が壊れた実績があるため、動作確認済みバージョンに固定している。
+# アップデートする場合は、必ず全タブ（銘柄分析・おすすめTOP10・ウォッチリスト・
+# カレンダー・増配ランキング）の動作確認を行ってから変更すること。
+#
+# 【要注意】yfinanceは0.2.38→1.5.1でメジャーバージョンが変わっている。
+# 0.x系から1.x系への移行でAPIの破壊的変更が含まれる可能性があるため、
+# 現状で正常動作していることを前提に固定。今後の更新時は特に注意すること。
+streamlit==1.58.0
+yfinance==1.5.1
+pandas==3.0.3
+numpy==2.5.0
+mplfinance==0.12.10b0
+matplotlib==3.11.0
+requests==2.34.2
