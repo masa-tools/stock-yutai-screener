@@ -15,14 +15,6 @@ app.py  v8.0
 """
 
 import streamlit as st
-import pandas
-import numpy
-import matplotlib
-import mplfinance
-import yfinance
-import requests
-
-st.sidebar.write("streamlit", st.__version__)
 import matplotlib.pyplot as plt
 plt.rcParams["font.family"] = "IPAexGothic"
 plt.rcParams["axes.unicode_minus"] = False
