@@ -46,6 +46,7 @@ from ui_components      import (
     render_stock_header, render_metrics,
     render_technical, render_score,
 )
+from backtest.debug_ui  import render_step1_debug_tab  # 🧪 開発用: Step1バックテストデバッグタブ
 
 
 # ════════════════════════════════════════
@@ -471,18 +472,20 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🔍 銘柄分析",
     "⭐ おすすめTOP10",
     "❤️ ウォッチリスト",
     "📅 カレンダー",
     "📈 増配ランキング",
+    "🧪 Step1バックテスト（開発用）",
 ])
 with tab1: render_analysis_tab(is_ai=IS_AI)
 with tab2: render_recommend_tab(is_ai=IS_AI)
 with tab3: render_watchlist_tab()
 with tab4: render_calendar_tab()
 with tab5: render_dividend_ranking_tab()
+with tab6: render_step1_debug_tab()  # 🧪 開発用: 既存タブの処理には一切影響しない
 
 st.markdown("""
 <div class="footer">
