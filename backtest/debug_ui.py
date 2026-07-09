@@ -10,16 +10,26 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
   効率よく比較・検証できる研究基盤」を整備することが目的。
   strategy_v9.py側のスコアリングロジックには一切手を加えていない。
 
+【今回の追加（rating.py デバッグUI統合）】
+  評価変換層（backtest/rating.py）が期待通りの判定を返しているかを
+  目視確認するため、「現在表示中のバックテスト結果の最新営業日」を
+  build_rating_from_score_result() に渡し、評価カードとして表示する
+  render_rating_card() を追加した。rating.py自体・他の既存ロジックは
+  一切変更していない。デザインの作り込みは行わず、componentsの
+  positive/negative/neutralをそのまま構造化データとして表示するに留める。
+
 【設計方針】
   backtest/ 配下の既存ロジック（data_loader / strategy_v8 / strategy_v9 /
-  backtest_runner / metrics）には一切変更を加えず、それらを呼び出すだけの
-  UI層とする。ロジックの再実装・重複実装は行わない。
+  backtest_runner / metrics / comparison / rating）には一切変更を加えず、
+  それらを呼び出すだけのUI層とする。ロジックの再実装・重複実装は行わない。
 
-  このファイル内も以下の4層に責務分離している。
+  このファイル内も以下の層に責務分離している。
     1. 設定・レジストリ（STOCK_CANDIDATES / PERIOD_OPTIONS / STRATEGY_REGISTRY）
     2. 選択UI（render_condition_selectors）
     3. 実行・キャッシュ管理（_execute_and_cache / セッションキャッシュ）
     4. 分析・描画（render_* 関数群。DataFrameを受け取って表示するだけ）
+    5. v8/v9比較（render_comparison_section。comparison.pyの薄いラッパー）
+    6. 評価変換層の動作確認（render_rating_card。rating.pyの薄いラッパー）
   将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
   追加するだけで比較対象に組み込める（他の層は変更不要）。
 
@@ -62,6 +72,7 @@ from backtest.metrics import (
     build_threshold_analysis,
 )
 from backtest import comparison
+from backtest.rating import build_rating_from_score_result
 
 
 # ════════════════════════════════════════════════
@@ -279,6 +290,9 @@ def _render_results(res_df: pd.DataFrame, meta: dict) -> None:
     render_summary_meta(meta)
 
     st.divider()
+    render_rating_card(res_df)
+
+    st.divider()
     threshold = render_threshold_slider(res_df)
 
     st.divider()
@@ -316,6 +330,70 @@ def render_summary_meta(meta: dict) -> None:
     st.caption(
         f"期間: {meta['period_start'].date()} 〜 {meta['period_end'].date()}"
     )
+
+
+# ────────────────────────────────────────────────
+# 評価変換層（rating.py）の動作確認カード ★今回追加
+# ────────────────────────────────────────────────
+def render_rating_card(res_df: pd.DataFrame) -> None:
+    """
+    現在表示中のバックテスト結果のうち、最新営業日（判定対象期間の最終日＝
+    「今日時点」に相当する行）のスコアを rating.build_rating_from_score_result()
+    に通し、評価変換層が期待通りの判定を返しているかを目視確認するための
+    カードを表示する。
+
+    デザインの作り込みは行わず、Grade/Label/Score と、componentsを
+    positive/negative/neutralに分類した生データをそのまま表示する。
+    説明文（reasons/strengths/cautions）は rating.py 側で現状すべて
+    空リストのプレースホルダーのため、そのまま空として表示される
+    （＝rating.py側の設計通りの挙動であることの確認にもなる）。
+    """
+    st.markdown("#### 🧾 評価変換層 動作確認（rating.py）")
+    st.caption(
+        "判定対象期間の最終営業日（最新日）のスコアを rating.py で変換した結果です。"
+        " ※現時点では説明文（reasons/strengths/cautions）は未実装のため空になります。"
+    )
+
+    if res_df.empty:
+        st.info("バックテスト結果が空のため、評価変換を実行できません。")
+        return
+
+    latest_row = res_df.iloc[-1].to_dict()
+    rating = build_rating_from_score_result(latest_row)
+
+    date_val = latest_row.get("date")
+    date_label = date_val.date() if hasattr(date_val, "date") else str(date_val)
+    st.caption(f"対象日: {date_label}")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Grade", rating["grade"])
+    col2.metric("Label", rating["label"])
+    col3.metric("Score", _fmt(rating["score"]))
+
+    breakdown = rating["component_breakdown"]
+
+    bc1, bc2, bc3 = st.columns(3)
+    with bc1:
+        st.markdown("**Positive Components**")
+        if breakdown["positive"]:
+            st.dataframe(pd.DataFrame(breakdown["positive"]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("なし")
+    with bc2:
+        st.markdown("**Negative Components**")
+        if breakdown["negative"]:
+            st.dataframe(pd.DataFrame(breakdown["negative"]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("なし")
+    with bc3:
+        st.markdown("**Neutral Components**")
+        if breakdown["neutral"]:
+            st.dataframe(pd.DataFrame(breakdown["neutral"]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("なし")
+
+    with st.expander("build_rating() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(rating)
 
 
 # ────────────────────────────────────────────────
@@ -476,7 +554,7 @@ def render_cache_controls() -> None:
     行う際、「今セッションで何を試したか」を見失わないための小さな補助機能。
     """
     cache = st.session_state.get(_SS_KEY_CACHE, {})
-    with st.expander(f"🗂️ このセッションで実行済みの組み合わせ（{len(cache)}件）"):
+    with st.expander(f"🗂 このセッションで実行済みの組み合わせ（{len(cache)}件）"):
         if not cache:
             st.caption("まだ実行された組み合わせはありません。")
         else:
