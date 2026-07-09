@@ -61,6 +61,7 @@ from backtest.metrics import (
     describe_score_distribution,
     build_threshold_analysis,
 )
+from backtest import comparison
 
 
 # ════════════════════════════════════════════════
@@ -148,6 +149,10 @@ def render_step1_debug_tab() -> None:
             st.error("❌ バックテスト実行中にエラーが発生しました。")
             st.code(traceback.format_exc(), language="text")
             return
+
+    st.divider()
+    render_comparison_section(code, period_code, period_label)
+    st.divider()
 
     cache = st.session_state.get(_SS_KEY_CACHE, {})
     cache_key = (code, period_code, strategy_key)
@@ -483,6 +488,99 @@ def render_cache_controls() -> None:
         if st.button("🗑 実行履歴をクリア", key="step1_clear_cache"):
             st.session_state[_SS_KEY_CACHE] = {}
             st.rerun()
+
+
+# ════════════════════════════════════════════════
+# 5. v8 / v9 比較セクション
+# ════════════════════════════════════════════════
+def render_comparison_section(code: str, period_code: str, period_label: str) -> None:
+    """
+    同一銘柄・同一期間でv8/v9を比較するセクション。
+    未実行の組み合わせは、このセクションのボタンから両方実行する
+    （既存のセッションキャッシュ・_execute_and_cache をそのまま再利用）。
+    """
+    st.markdown("### 🆚 v8 / v9 比較")
+    st.caption(f"対象: {code} {STOCK_CANDIDATES.get(code, '')} / {period_label}")
+
+    compare_clicked = st.button("▶ v8/v9比較を実行", key="step1_compare_run")
+
+    if compare_clicked:
+        cache = st.session_state.get(_SS_KEY_CACHE, {})
+        for strategy_key in ("v8", "v9"):
+            if (code, period_code, strategy_key) not in cache:
+                try:
+                    _execute_and_cache(code, period_label, period_code, strategy_key)
+                except Exception:
+                    st.error(f"❌ {strategy_key}のバックテスト実行中にエラーが発生しました。")
+                    st.code(traceback.format_exc(), language="text")
+                    return
+
+    cache = st.session_state.get(_SS_KEY_CACHE, {})
+    key_v8 = (code, period_code, "v8")
+    key_v9 = (code, period_code, "v9")
+
+    if key_v8 not in cache or key_v9 not in cache:
+        st.info("「▶ v8/v9比較を実行」ボタンを押すと、両方のロジックでバックテストを実行して比較します。")
+        return
+
+    res_df_v8, _ = cache[key_v8]
+    res_df_v9, _ = cache[key_v9]
+
+    th_v8_min, th_v8_max = _compute_threshold_range(res_df_v8)
+    th_v9_min, th_v9_max = _compute_threshold_range(res_df_v9)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        threshold_v8 = st.slider("v8判定閾値", th_v8_min, th_v8_max,
+                                  th_v8_min + (th_v8_max - th_v8_min) // 2,
+                                  key="compare_threshold_v8")
+    with c2:
+        threshold_v9 = st.slider("v9判定閾値", th_v9_min, th_v9_max,
+                                  th_v9_min + (th_v9_max - th_v9_min) // 2,
+                                  key="compare_threshold_v9")
+
+    filtered_v8 = filter_results(res_df_v8, threshold_v8)
+    filtered_v9 = filter_results(res_df_v9, threshold_v9)
+
+    st.markdown("#### 📈 スコア推移比較")
+    trend_df = comparison.align_score_series(res_df_v8, res_df_v9, "v8", "v9").set_index("date")
+    st.line_chart(trend_df[["v8", "v9"]])
+
+    st.markdown("#### 📊 比較サマリー")
+    results = {
+        "v8": {"res_df": res_df_v8, "filtered_df": filtered_v8, "threshold": threshold_v8,
+               "label": STRATEGY_REGISTRY["v8"]["label"]},
+        "v9": {"res_df": res_df_v9, "filtered_df": filtered_v9, "threshold": threshold_v9,
+               "label": STRATEGY_REGISTRY["v9"]["label"]},
+    }
+    summary = comparison.build_comparison_summary(results)
+    render_comparison_table(summary)
+
+    st.markdown("#### 🔍 v9 加減点要因の内訳（どのシグナルがスコアに効いたか）")
+    contrib_df = comparison.summarize_component_contributions(res_df_v9)
+    if contrib_df is not None and not contrib_df.empty:
+        st.dataframe(contrib_df, use_container_width=True)
+    else:
+        st.caption("内訳データがありません。")
+
+
+def render_comparison_table(summary: dict) -> None:
+    """build_comparison_summary()の戻り値を見やすい比較表として描画する。"""
+    rows = []
+    for s in summary.values():
+        rt = s["return_tendency"]
+        signal_1m = rt.get("signal_days", {}).get("fwd_return_1m", {})
+        rows.append({
+            "ロジック": s["label"],
+            "判定対象日数": s["judged_days"],
+            "シグナル件数": s["signal_count"],
+            "シグナル率(%)": _fmt(s["signal_rate"]),
+            "高得点日割合(%)": _fmt(s["high_score_ratio"]),
+            "最大DD(%)": _fmt(s["max_drawdown"]),
+            "-10%以上下落率(%)": _fmt(s["down10_rate"]),
+            "シグナル日 平均1ヶ月後リターン(%)": _fmt(signal_1m.get("mean")),
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 
 # ────────────────────────────────────────────────
