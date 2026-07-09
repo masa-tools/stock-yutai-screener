@@ -38,6 +38,7 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
 """
 
 import traceback
+import math
 
 import pandas as pd
 import streamlit as st
@@ -58,9 +59,14 @@ TARGET_CODE = "7203"     # トヨタ
 TARGET_PERIOD = "1y"     # 過去1年
 
 # 閾値スライダーの設定
-THRESHOLD_MIN = 0
-THRESHOLD_MAX = 50
-THRESHOLD_DEFAULT = 40
+# v9はv8ベーススコアに加減点を積み上げるため、スコアの実際の取りうる範囲は
+# 固定値では決め打ちできない（v9.1以降の重み調整でも変動しうる）。
+# 固定範囲(旧: 0〜50)だと実際のスコア分布と噛み合わず、シグナル件数・
+# 最大ドローダウン・下落率の感度分析グラフが常に「全日シグナル対象」の
+# ままフラットに見えてしまうため、res_dfの実データからスライダー範囲を
+# 都度動的に算出する。以下は res_df が空等で算出できない場合のフォールバック値。
+THRESHOLD_MIN_FALLBACK = 0
+THRESHOLD_MAX_FALLBACK = 100
 THRESHOLD_STEP = 1
 
 # session_state に res_df を保持するためのキー
@@ -340,6 +346,25 @@ def render_filtered_table(filtered_df: pd.DataFrame) -> None:
     })
 
     st.dataframe(display_df, use_container_width=True)
+
+ 
+ 
+def _compute_threshold_range(res_df: pd.DataFrame, score_col: str = "total") -> tuple[int, int]:
+    """
+    res_dfの実際のスコア分布からスライダーの下限・上限を動的に算出する。
+    最小値-5〜最大値+5をスライダー範囲とし、実データより少し広めに取ることで
+    「シグナル0件」「シグナル全件」の両端も確認できるようにする。
+    """
+    if res_df.empty or score_col not in res_df.columns:
+        return THRESHOLD_MIN_FALLBACK, THRESHOLD_MAX_FALLBACK
+
+    valid = res_df[score_col].dropna()
+    if valid.empty:
+        return THRESHOLD_MIN_FALLBACK, THRESHOLD_MAX_FALLBACK
+
+    lo = int(math.floor(valid.min())) - 5
+    hi = int(math.ceil(valid.max())) + 5
+    return lo, hi
 
 
 def _fmt(value, suffix: str = "") -> str:
