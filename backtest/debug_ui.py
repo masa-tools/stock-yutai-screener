@@ -43,7 +43,7 @@ import pandas as pd
 import streamlit as st
 
 from backtest.data_loader import fetch_stock_data
-from backtest.strategy_v8 import compute_score_at
+from backtest.strategy_v9 import compute_score_at_v9
 from backtest.backtest_runner import run_backtest, REQUIRED_HISTORY_DAYS
 from backtest.metrics import (
     filter_by_threshold,
@@ -83,7 +83,7 @@ def render_step1_debug_tab() -> None:
     st.markdown("### 🧪 Step1バックテスト（開発・検証専用）")
     st.caption(
         f"対象銘柄: {TARGET_CODE}（トヨタ） / 期間: 過去{TARGET_PERIOD} / "
-        "v8スコアリングのみ / 全営業日判定方式"
+        "v9スコアリング（v8ベース+加減点） / 全営業日判定方式"
     )
     st.warning(
         "⚠️ このタブは開発・検証専用です。一般利用者向けの機能ではありません。",
@@ -137,7 +137,7 @@ def _execute_backtest_and_store() -> None:
 
     st.success("✅ データ取得完了")
 
-    res_df = run_backtest(df, info, TARGET_CODE, compute_score_at)
+    res_df = run_backtest(df, info, TARGET_CODE, compute_score_at_v9)
 
     if res_df.empty:
         st.error(
