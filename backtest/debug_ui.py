@@ -176,7 +176,7 @@ def _render_results(res_df: pd.DataFrame, meta: dict) -> None:
     render_distribution(res_df)
 
     st.divider()
-    threshold = render_threshold_slider()
+    threshold = render_threshold_slider(res_df)
 
     st.divider()
     filtered_df = filter_results(res_df, threshold)
@@ -227,7 +227,7 @@ def render_distribution(res_df: pd.DataFrame, score_col: str = "total") -> None:
         st.metric("第3四分位(75%)", _fmt(dist["q75"]))
 
 
-def render_threshold_slider() -> int:
+def render_threshold_slider(res_df: pd.DataFrame) -> int:
     """
     判定閾値スライダーを表示し、選択された閾値を返す。
 
@@ -236,11 +236,12 @@ def render_threshold_slider() -> int:
     そのまま読み直される）。
     """
     st.markdown("#### 🎚️ 判定閾値")
+    th_min, th_max = _compute_threshold_range(res_df)
     threshold = st.slider(
         "判定閾値",
-        min_value=THRESHOLD_MIN,
-        max_value=THRESHOLD_MAX,
-        value=THRESHOLD_DEFAULT,
+        min_value=th_min,
+        max_value=th_max,
+        value=th_min + (th_max - th_min) // 2,
         step=THRESHOLD_STEP,
         key="step1_threshold_slider",
         label_visibility="collapsed",
@@ -296,7 +297,8 @@ def render_threshold_analysis(res_df: pd.DataFrame) -> None:
     """
     st.markdown("#### 📈 感度分析（閾値を変えた場合の傾向）")
 
-    thresholds = range(THRESHOLD_MIN, THRESHOLD_MAX + 1)
+    th_min, th_max = _compute_threshold_range(res_df)
+    thresholds = range(th_min, th_max + 1)
     analysis_df = build_threshold_analysis(res_df, thresholds)
 
     chart_df = analysis_df.set_index("threshold")
