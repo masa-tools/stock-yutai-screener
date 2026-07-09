@@ -142,3 +142,48 @@ def describe_score_distribution(df: pd.DataFrame,
         "q25": float(s.quantile(0.25)),
         "q75": float(s.quantile(0.75)),
     }
+
+
+def build_threshold_analysis(df: pd.DataFrame, thresholds,
+                              score_col: str = "total",
+                              dd_col: str = "max_drawdown_1m") -> pd.DataFrame:
+    """
+    閾値を変えながら感度分析用の集計表を作る（Step1拡張・UI感度分析グラフ用）。
+
+    バックテストの再実行は一切行わない。引数の df（run_backtest()の
+    戻り値）に対して、既存の filter_by_threshold / calc_max_drawdown /
+    calc_down10_rate を各閾値ごとに適用するだけの集計関数。
+
+    strategy_v8/v9/v10のどれで生成されたdfであっても、
+    score_col・dd_col の列名さえ一致していれば同じ形式で利用できるため、
+    UI層がstrategy固有のロジックを持たずに済む設計を支える。
+
+    Args:
+        df        : run_backtest()の戻り値（閾値フィルタ前の全営業日データ）
+        thresholds: 走査する閾値のリスト・イテラブル（例: range(0, 51)）
+        score_col : 判定に使うスコア列名
+        dd_col    : ドローダウン列名
+
+    Returns:
+        1行=1閾値のDataFrame。列は以下：
+          threshold, signal_count, signal_rate,
+          max_drawdown, down10_rate
+        該当日が0件の閾値は max_drawdown / down10_rate が None になる。
+    """
+    total_days = len(df)
+    records = []
+
+    for th in thresholds:
+        filtered = filter_by_threshold(df, th, score_col=score_col)
+        signal_count = len(filtered)
+        signal_rate = (signal_count / total_days * 100) if total_days > 0 else None
+
+        records.append({
+            "threshold": th,
+            "signal_count": signal_count,
+            "signal_rate": signal_rate,
+            "max_drawdown": calc_max_drawdown(filtered, dd_col=dd_col),
+            "down10_rate": calc_down10_rate(filtered, dd_col=dd_col),
+        })
+
+    return pd.DataFrame(records)
