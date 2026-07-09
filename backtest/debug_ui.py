@@ -10,18 +10,18 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
   効率よく比較・検証できる研究基盤」を整備することが目的。
   strategy_v9.py側のスコアリングロジックには一切手を加えていない。
 
-【今回の追加（rating.py デバッグUI統合）】
-  評価変換層（backtest/rating.py）が期待通りの判定を返しているかを
-  目視確認するため、「現在表示中のバックテスト結果の最新営業日」を
-  build_rating_from_score_result() に渡し、評価カードとして表示する
-  render_rating_card() を追加した。rating.py自体・他の既存ロジックは
-  一切変更していない。デザインの作り込みは行わず、componentsの
-  positive/negative/neutralをそのまま構造化データとして表示するに留める。
+【今回の追加（評価カードへの過去実績統計の紐付け）】
+  評価カード（rating.py）が示すグレードのスコア範囲について、
+  「過去このスコア帯だった日は実際どうだったか」を
+  backtest/statistics.py（strategy非依存・新規）で集計し、
+  評価カードの直下に表示する render_rating_history_stats() を追加した。
+  rating.py・metrics.py・comparison.py・v8/v9ロジックは一切変更していない。
 
 【設計方針】
   backtest/ 配下の既存ロジック（data_loader / strategy_v8 / strategy_v9 /
-  backtest_runner / metrics / comparison / rating）には一切変更を加えず、
-  それらを呼び出すだけのUI層とする。ロジックの再実装・重複実装は行わない。
+  backtest_runner / metrics / comparison / rating / statistics）には
+  一切変更を加えず、それらを呼び出すだけのUI層とする。
+  ロジックの再実装・重複実装は行わない。
 
   このファイル内も以下の層に責務分離している。
     1. 設定・レジストリ（STOCK_CANDIDATES / PERIOD_OPTIONS / STRATEGY_REGISTRY）
@@ -30,6 +30,7 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
     4. 分析・描画（render_* 関数群。DataFrameを受け取って表示するだけ）
     5. v8/v9比較（render_comparison_section。comparison.pyの薄いラッパー）
     6. 評価変換層の動作確認（render_rating_card。rating.pyの薄いラッパー）
+    7. 評価グレードの過去実績統計（render_rating_history_stats。statistics.pyの薄いラッパー）
   将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
   追加するだけで比較対象に組み込める（他の層は変更不要）。
 
@@ -72,7 +73,8 @@ from backtest.metrics import (
     build_threshold_analysis,
 )
 from backtest import comparison
-from backtest.rating import build_rating_from_score_result
+from backtest.rating import build_rating_from_score_result, DEFAULT_RATING_CONFIG
+from backtest.statistics import build_score_range_stats
 
 
 # ════════════════════════════════════════════════
@@ -333,7 +335,7 @@ def render_summary_meta(meta: dict) -> None:
 
 
 # ────────────────────────────────────────────────
-# 評価変換層（rating.py）の動作確認カード ★今回追加
+# 評価変換層（rating.py）の動作確認カード
 # ────────────────────────────────────────────────
 def render_rating_card(res_df: pd.DataFrame) -> None:
     """
@@ -342,11 +344,9 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
     に通し、評価変換層が期待通りの判定を返しているかを目視確認するための
     カードを表示する。
 
-    デザインの作り込みは行わず、Grade/Label/Score と、componentsを
-    positive/negative/neutralに分類した生データをそのまま表示する。
-    説明文（reasons/strengths/cautions）は rating.py 側で現状すべて
-    空リストのプレースホルダーのため、そのまま空として表示される
-    （＝rating.py側の設計通りの挙動であることの確認にもなる）。
+    Grade/Label/Score・componentsの生データに加え、そのグレードの
+    スコア範囲についての過去実績統計（render_rating_history_stats）を
+    直下に表示する。
     """
     st.markdown("#### 🧾 評価変換層 動作確認（rating.py）")
     st.caption(
@@ -369,6 +369,10 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
     col1.metric("Grade", rating["grade"])
     col2.metric("Label", rating["label"])
     col3.metric("Score", _fmt(rating["score"]))
+
+    st.divider()
+    render_rating_history_stats(res_df, rating["grade"])
+    st.divider()
 
     breakdown = rating["component_breakdown"]
 
@@ -394,6 +398,47 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
 
     with st.expander("build_rating() 戻り値 全体（デバッグ用 raw dict）"):
         st.json(rating)
+
+
+# ────────────────────────────────────────────────
+# 評価グレードの過去実績統計（★今回追加）
+# ────────────────────────────────────────────────
+def render_rating_history_stats(res_df: pd.DataFrame, grade: str) -> None:
+    """
+    評価カードが示すグレードのスコア範囲について、「このスコア帯は過去
+    どのような成績だったか」を backtest/statistics.build_score_range_stats()
+    （strategy非依存の新規モジュール）で集計し、表示する。
+
+    このUI関数自体は集計ロジックを一切持たず、
+      1. rating.DEFAULT_RATING_CONFIG からグレードのスコア範囲(min/max)を引く
+      2. statistics.build_score_range_stats(res_df, min, max) を呼ぶ
+      3. 戻り値を表示する
+    という3ステップの薄いラッパーに留めている。
+    """
+    st.markdown("##### 📚 過去実績（この評価グレードのスコア帯）")
+
+    band = next((b for b in DEFAULT_RATING_CONFIG.grade_bands if b.grade == grade), None)
+    if band is None:
+        st.caption("このグレードにはスコア範囲が定義されていないため、統計を算出できません。")
+        return
+
+    stats = build_score_range_stats(res_df, min_score=band.min_score, max_score=band.max_score)
+
+    if stats["count"] == 0:
+        st.caption("このスコア帯に該当する営業日は過去にありませんでした。")
+        return
+
+    row1 = st.columns(4)
+    row1[0].metric("対象件数", f"{stats['count']}件")
+    row1[1].metric("全営業日に対する割合", _fmt(stats["ratio_pct"], suffix="%"))
+    row1[2].metric("勝率（1ヶ月後）", _fmt(stats["win_rate"], suffix="%"))
+    row1[3].metric("最大ドローダウン", _fmt(stats["max_drawdown"], suffix="%"))
+
+    row2 = st.columns(4)
+    row2[0].metric("平均1週間リターン", _fmt(stats["avg_return_1w"], suffix="%"))
+    row2[1].metric("平均1ヶ月リターン", _fmt(stats["avg_return_1m"], suffix="%"))
+    row2[2].metric("平均3ヶ月リターン", _fmt(stats["avg_return_3m"], suffix="%"))
+    row2[3].metric("-10%以上下落率", _fmt(stats["down10_rate"], suffix="%"))
 
 
 # ────────────────────────────────────────────────
@@ -447,7 +492,7 @@ def filter_results(res_df: pd.DataFrame, threshold: int,
 
 
 # ────────────────────────────────────────────────
-# 評価指標パネル（要件③：整理・拡充）
+# 評価指標パネル
 # ────────────────────────────────────────────────
 def render_metrics_overview(res_df: pd.DataFrame, filtered_df: pd.DataFrame,
                              threshold: int, score_col: str = "total") -> None:
@@ -554,7 +599,7 @@ def render_cache_controls() -> None:
     行う際、「今セッションで何を試したか」を見失わないための小さな補助機能。
     """
     cache = st.session_state.get(_SS_KEY_CACHE, {})
-    with st.expander(f"🗂 このセッションで実行済みの組み合わせ（{len(cache)}件）"):
+    with st.expander(f"🗂️ このセッションで実行済みの組み合わせ（{len(cache)}件）"):
         if not cache:
             st.caption("まだ実行された組み合わせはありません。")
         else:
