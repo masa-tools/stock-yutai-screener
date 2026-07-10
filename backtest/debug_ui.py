@@ -4,14 +4,25 @@ backtest/debug_ui.py  (v9研究開発ブランチ Phase3 - 研究・検証基盤
 Step1バックテストの結果をブラウザ（Streamlit）から確認するための
 開発・検証専用UI層。
 
-【今回の追加（Evaluation Lab）】
-  v9_config.py のパラメータ調整による影響を比較検証するための
-  「評価実験基盤（Evaluation Lab）」セクションを追加した。
-  分析ロジックはすべて backtest/evaluation.py（新規）に実装しており、
-  このファイルは戻り値を表示するだけ。evaluation.py以外の既存ロジック
-  （strategy_v8/v9・backtest_runner・metrics・comparison・rating・
-  statistics・confidence・confidence_explain）は一切変更していない。
-  Decision（最終投資判断）は今回のスコープ外。
+【今回の追加（Decision Engineの投資判断カード表示）】
+  backtest/decision.py（Decision Engine・無変更）を呼び出し、
+  「結局、今は買いなのか？」が一目で分かる投資判断カードを追加した。
+  render_decision_card() は decision.build_decision() の戻り値を
+  そのまま描画するだけの薄いUI層であり、判断ロジックは一切持たない。
+  decision.py・rating.py・statistics.py・confidence.py・
+  confidence_explain.py・evaluation.py・comparison.py・
+  strategy_v8/v9・metrics.py・app.pyは一切変更していない。
+
+  表示位置は 評価カード → Confidence → Decision Card → Evaluation Lab
+  の順になるよう、render_rating_card() 内から
+  render_confidence_section() の直後に render_decision_card() を
+  呼び出す構成にしている（Evaluation Labは_render_results側で
+  引き続き別セクションとして最後に表示される）。
+
+  このDecision Cardは将来「株ラボ」本番UIのメイン画面にもそのまま
+  流用することを想定し、render_decision_card(rating, stats, confidence)
+  という「3つの分析結果dictを受け取って描画するだけ」の独立関数として
+  実装している（debug_ui固有の状態管理には依存しない）。
 
 【設計方針】
   backtest/ 配下の既存ロジックには一切変更を加えず、それらを
@@ -27,7 +38,8 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
     7. 評価グレードの過去実績統計（render_rating_history_stats。statistics.pyの薄いラッパー）
     8. Confidence（render_confidence_section。confidence.pyの薄いラッパー）
     9. Confidenceの内訳可視化（render_confidence_breakdown。confidence_explain.pyの薄いラッパー）
-    10. Evaluation Lab（render_evaluation_lab。evaluation.pyの薄いラッパー）
+    10. Decision Card（render_decision_card。decision.pyの薄いラッパー）
+    11. Evaluation Lab（render_evaluation_lab。evaluation.pyの薄いラッパー）
   将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
   追加するだけで比較対象に組み込める（他の層は変更不要）。
 
@@ -74,6 +86,7 @@ from backtest.rating import build_rating_from_score_result, DEFAULT_RATING_CONFI
 from backtest.statistics import build_score_range_stats
 from backtest.confidence import build_confidence
 from backtest.confidence_explain import build_confidence_explanation
+from backtest.decision import build_decision
 from backtest import evaluation
 
 
@@ -128,6 +141,17 @@ THRESHOLD_STEP = 1
 # 同じ組み合わせで再実行してもyfinance呼び出し・スコア再計算が
 # 発生しないようにするための、条件ごとのキャッシュ。
 _SS_KEY_CACHE = "step1_results_cache"
+
+# ── Decision表示用の★マッピング（表示専用。判断ロジックではない） ──
+# decision.build_decision() が返す "decision" 文字列を★の数に変換するだけの
+# 表示ヘルパー。判断そのものはdecision.py側のマトリクスが決めており、
+# ここでは見た目の表現のみを扱う。
+_DECISION_STARS: dict[str, int] = {
+    "Strong Buy": 5,
+    "Buy": 4,
+    "Watch": 2,
+    "Avoid": 1,
+}
 
 
 # ════════════════════════════════════════════════
@@ -290,6 +314,10 @@ def _render_results(res_df: pd.DataFrame, meta: dict) -> None:
     UI部品は render_* 関数へ分離しており、それぞれ
     「DataFrameを受け取って表示するだけ」の責務に限定している。
     strategy固有の条件分岐は持たない。
+
+    表示順: 実行条件 → 評価カード(Grade/Confidence/Decision Card含む)
+            → 閾値スライダー → 評価指標 → 感度分析 → 日次結果
+            → Evaluation Lab → キャッシュ管理
     """
     render_summary_meta(meta)
 
@@ -349,10 +377,8 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
     に通し、評価変換層が期待通りの判定を返しているかを目視確認するための
     カードを表示する。
 
-    Grade/Label/Score・componentsの生データに加え、そのグレードの
-    スコア範囲についての過去実績統計（render_rating_history_stats）と、
-    その統計から算出したConfidence（render_confidence_section）を
-    直下に表示する。
+    表示順（PM指定）: 評価カード(Grade/Label/Score) → 過去実績統計
+    → Confidence → Decision Card → Components内訳
     """
     st.markdown("#### 🧾 評価変換層 動作確認（rating.py）")
     st.caption(
@@ -378,9 +404,16 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
 
     st.divider()
     stats = render_rating_history_stats(res_df, rating["grade"])
+
+    confidence = None
     if stats is not None:
         st.divider()
-        render_confidence_section(stats)
+        confidence = render_confidence_section(stats)
+
+    if stats is not None and confidence is not None:
+        st.divider()
+        render_decision_card(rating, stats, confidence)
+
     st.divider()
 
     breakdown = rating["component_breakdown"]
@@ -427,7 +460,7 @@ def render_rating_history_stats(res_df: pd.DataFrame, grade: str) -> dict | None
     Returns:
         算出したstats（build_score_range_statsの戻り値）。
         グレード未定義・該当日0件の場合はNoneを返す
-        （呼び出し側でConfidence算出をスキップする判断に使う）。
+        （呼び出し側でConfidence/Decision算出をスキップする判断に使う）。
     """
     st.markdown("##### 📚 過去実績（この評価グレードのスコア帯）")
 
@@ -460,7 +493,7 @@ def render_rating_history_stats(res_df: pd.DataFrame, grade: str) -> dict | None
 # ────────────────────────────────────────────────
 # Confidence（信頼度）
 # ────────────────────────────────────────────────
-def render_confidence_section(stats: dict) -> None:
+def render_confidence_section(stats: dict) -> dict:
     """
     過去実績統計(stats)から算出したConfidence（信頼度）を表示する。
 
@@ -473,6 +506,10 @@ def render_confidence_section(stats: dict) -> None:
     Confidenceの内訳（どの因子が強み/弱みか）は
     backtest/confidence_explain.py（confidence.pyとは責務分離）
     に委譲し、render_confidence_breakdown()で表示する。
+
+    Returns:
+        build_confidence()の戻り値。呼び出し側（render_rating_card）が
+        Decision Card（render_decision_card）へそのまま渡すために使う。
     """
     st.markdown("##### 🛡️ Confidence（この評価の信頼度）")
     st.caption("Scoreそのものではなく、このスコア帯の過去統計がどれだけ再現性を持つかを示します。")
@@ -494,6 +531,8 @@ def render_confidence_section(stats: dict) -> None:
         st.json(confidence)
 
     render_confidence_breakdown(confidence)
+
+    return confidence
 
 
 def render_confidence_breakdown(confidence: dict) -> None:
@@ -531,6 +570,61 @@ def _confidence_stars(score: float) -> str:
     filled = round(score / 20)
     filled = max(0, min(5, filled))
     return "★" * filled + "☆" * (5 - filled)
+
+
+# ────────────────────────────────────────────────
+# Decision Card（投資判断カード）★今回追加
+# ────────────────────────────────────────────────
+def render_decision_card(rating: dict, stats: dict, confidence: dict) -> None:
+    """
+    Decision Engine（backtest/decision.py・無変更）を呼び出し、
+    「結局、今は買いなのか？」が一目で分かる投資判断カードを表示する。
+
+    このUI関数は decision.build_decision() の戻り値を描画するだけの
+    薄い層であり、判断ロジック（Grade×Confidenceのマトリクス、
+    Risk判定、Summary文言の選定）は一切持たない。
+
+    将来「株ラボ」本番UIのメイン画面にそのまま流用することを想定し、
+    引数はrating/stats/confidenceの3つの辞書のみとしている
+    （debug_ui固有のsession_state等には依存しない）。
+
+    将来、配当評価・優待評価・ファンダメンタル評価・AIコメント等を
+    追加する場合は、build_decision()呼び出しにextra_signals引数を
+    渡した上で、このカード内に表示行を数項目追加するだけで対応できる
+    （decision.py・本関数のコア構造自体の変更は不要な想定）。
+
+    Args:
+        rating    : rating.build_rating_from_score_result() の戻り値
+        stats     : statistics.build_score_range_stats() の戻り値
+        confidence: confidence.build_confidence() の戻り値
+    """
+    st.markdown("##### 🧭 【投資判断】Decision Card")
+
+    decision_result = build_decision(rating, stats, confidence)
+
+    decision_label = decision_result["decision"]
+    stars_count = _DECISION_STARS.get(decision_label, 0)
+    stars_display = "★" * stars_count + "☆" * (5 - stars_count)
+
+    with st.container(border=True):
+        st.markdown(f"### {stars_display}　**{decision_label}**")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Grade", decision_result["grade"])
+        col2.metric("Confidence", decision_result["confidence"])
+        col3.metric("Risk", decision_result["risk"])
+
+        st.info(decision_result["summary"])
+
+        # ── 将来の拡張ポイント ──────────────────────
+        # 配当評価・優待評価・ファンダメンタル評価・AIコメント等を
+        # 追加する場合、ここに st.metric / st.caption 等を数行追加するだけでよい。
+        # 例:
+        #   if decision_result.get("dividend_grade"):
+        #       st.metric("配当評価", decision_result["dividend_grade"])
+
+    with st.expander("build_decision() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(decision_result)
 
 
 # ────────────────────────────────────────────────
@@ -682,7 +776,7 @@ def render_filtered_table(filtered_df: pd.DataFrame) -> None:
 
 
 # ════════════════════════════════════════════════
-# 10. Evaluation Lab（★今回追加）
+# Evaluation Lab
 # ════════════════════════════════════════════════
 def render_evaluation_lab(res_df: pd.DataFrame, meta: dict) -> None:
     """
@@ -705,7 +799,7 @@ def render_evaluation_lab(res_df: pd.DataFrame, meta: dict) -> None:
 
 
 def render_evaluation_summary(meta: dict) -> None:
-    """① 現在の設定値（銘柄・期間・ロジック・v9_config.pyのスナップショット）を表示する。"""
+    """現在の設定値（銘柄・期間・ロジック・v9_config.pyのスナップショット）を表示する。"""
     st.markdown("#### 🔧 Evaluation Summary（現在の設定）")
 
     col1, col2, col3 = st.columns(3)
@@ -728,7 +822,7 @@ def render_evaluation_summary(meta: dict) -> None:
 
 
 def render_score_distribution_lab(res_df: pd.DataFrame) -> None:
-    """② Score分布（ヒストグラム・件数・中央値・平均・標準偏差）を表示する。"""
+    """Score分布（ヒストグラム・件数・中央値・平均・標準偏差）を表示する。"""
     st.markdown("#### 📈 Score分布")
 
     dist = evaluation.build_score_distribution_summary(res_df)
@@ -750,7 +844,7 @@ def render_score_distribution_lab(res_df: pd.DataFrame) -> None:
 
 
 def render_confidence_distribution_lab(res_df: pd.DataFrame) -> None:
-    """③ Confidence分布（High/Medium/Lowの割合）を表示する。"""
+    """Confidence分布（High/Medium/Lowの割合）を表示する。"""
     st.markdown("#### 🛡️ Confidence分布")
 
     dist = evaluation.build_confidence_distribution(res_df)
@@ -780,7 +874,7 @@ def render_confidence_distribution_lab(res_df: pd.DataFrame) -> None:
 
 
 def render_threshold_impact_lab(res_df: pd.DataFrame) -> None:
-    """④ 閾値変更の影響比較を表示する。"""
+    """閾値変更の影響比較を表示する。"""
     st.markdown("#### 🎚️ 閾値変更の影響比較")
     st.caption("例: Strong Buyの閾値を90→85に変えると対象件数・平均利益・DDがどう変わるかを比較できます。")
 
@@ -822,7 +916,7 @@ def render_threshold_impact_lab(res_df: pd.DataFrame) -> None:
 
 
 def render_stock_comparison_lab(period_code: str, period_label: str, strategy_key: str) -> None:
-    """⑤ 複数銘柄のStatistics/Confidenceを一覧比較する。"""
+    """複数銘柄のStatistics/Confidenceを一覧比較する。"""
     st.markdown("#### 🏢 銘柄比較（Statistics / Confidence）")
     st.caption(f"期間: {period_label} / ロジック: {STRATEGY_REGISTRY[strategy_key]['label']}")
 
@@ -1031,4 +1125,3 @@ def _fmt(value, suffix: str = "") -> str:
         return f"{f:.2f}{suffix}"
     except (TypeError, ValueError):
         return "―"
-
