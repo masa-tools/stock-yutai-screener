@@ -10,18 +10,20 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
   効率よく比較・検証できる研究基盤」を整備することが目的。
   strategy_v9.py側のスコアリングロジックには一切手を加えていない。
 
-【今回の追加（評価カードへの過去実績統計の紐付け）】
-  評価カード（rating.py）が示すグレードのスコア範囲について、
-  「過去このスコア帯だった日は実際どうだったか」を
-  backtest/statistics.py（strategy非依存・新規）で集計し、
-  評価カードの直下に表示する render_rating_history_stats() を追加した。
-  rating.py・metrics.py・comparison.py・v8/v9ロジックは一切変更していない。
+【今回の追加（Confidenceの説明可能性強化）】
+  Confidence（confidence.py）の算出に使われた各因子の内訳を、
+  backtest/confidence_explain.py（新規、Confidenceの計算とは責務分離）
+  で構造化データへ変換し、st.progress()の横棒で可視化する
+  render_confidence_breakdown() を追加した。
+  confidence.py・confidence_explain.py以外の既存ロジック
+  （statistics.py・rating.py・comparison.py・metrics.py・
+  v8/v9ロジック）は一切変更していない。
 
 【設計方針】
   backtest/ 配下の既存ロジック（data_loader / strategy_v8 / strategy_v9 /
-  backtest_runner / metrics / comparison / rating / statistics）には
-  一切変更を加えず、それらを呼び出すだけのUI層とする。
-  ロジックの再実装・重複実装は行わない。
+  backtest_runner / metrics / comparison / rating / statistics /
+  confidence / confidence_explain）には一切変更を加えず、それらを
+  呼び出すだけのUI層とする。ロジックの再実装・重複実装は行わない。
 
   このファイル内も以下の層に責務分離している。
     1. 設定・レジストリ（STOCK_CANDIDATES / PERIOD_OPTIONS / STRATEGY_REGISTRY）
@@ -31,6 +33,8 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
     5. v8/v9比較（render_comparison_section。comparison.pyの薄いラッパー）
     6. 評価変換層の動作確認（render_rating_card。rating.pyの薄いラッパー）
     7. 評価グレードの過去実績統計（render_rating_history_stats。statistics.pyの薄いラッパー）
+    8. Confidence（render_confidence_section。confidence.pyの薄いラッパー）
+    9. Confidenceの内訳可視化（render_confidence_breakdown。confidence_explain.pyの薄いラッパー）
   将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
   追加するだけで比較対象に組み込める（他の層は変更不要）。
 
@@ -75,6 +79,8 @@ from backtest.metrics import (
 from backtest import comparison
 from backtest.rating import build_rating_from_score_result, DEFAULT_RATING_CONFIG
 from backtest.statistics import build_score_range_stats
+from backtest.confidence import build_confidence
+from backtest.confidence_explain import build_confidence_explanation
 
 
 # ════════════════════════════════════════════════
@@ -345,7 +351,8 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
     カードを表示する。
 
     Grade/Label/Score・componentsの生データに加え、そのグレードの
-    スコア範囲についての過去実績統計（render_rating_history_stats）を
+    スコア範囲についての過去実績統計（render_rating_history_stats）と、
+    その統計から算出したConfidence（render_confidence_section）を
     直下に表示する。
     """
     st.markdown("#### 🧾 評価変換層 動作確認（rating.py）")
@@ -371,7 +378,10 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
     col3.metric("Score", _fmt(rating["score"]))
 
     st.divider()
-    render_rating_history_stats(res_df, rating["grade"])
+    stats = render_rating_history_stats(res_df, rating["grade"])
+    if stats is not None:
+        st.divider()
+        render_confidence_section(stats)
     st.divider()
 
     breakdown = rating["component_breakdown"]
@@ -401,32 +411,37 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
 
 
 # ────────────────────────────────────────────────
-# 評価グレードの過去実績統計（★今回追加）
+# 評価グレードの過去実績統計
 # ────────────────────────────────────────────────
-def render_rating_history_stats(res_df: pd.DataFrame, grade: str) -> None:
+def render_rating_history_stats(res_df: pd.DataFrame, grade: str) -> dict | None:
     """
     評価カードが示すグレードのスコア範囲について、「このスコア帯は過去
     どのような成績だったか」を backtest/statistics.build_score_range_stats()
-    （strategy非依存の新規モジュール）で集計し、表示する。
+    （strategy非依存モジュール）で集計し、表示する。
 
     このUI関数自体は集計ロジックを一切持たず、
       1. rating.DEFAULT_RATING_CONFIG からグレードのスコア範囲(min/max)を引く
       2. statistics.build_score_range_stats(res_df, min, max) を呼ぶ
       3. 戻り値を表示する
     という3ステップの薄いラッパーに留めている。
+
+    Returns:
+        算出したstats（build_score_range_statsの戻り値）。
+        グレード未定義・該当日0件の場合はNoneを返す
+        （呼び出し側でConfidence算出をスキップする判断に使う）。
     """
     st.markdown("##### 📚 過去実績（この評価グレードのスコア帯）")
 
     band = next((b for b in DEFAULT_RATING_CONFIG.grade_bands if b.grade == grade), None)
     if band is None:
         st.caption("このグレードにはスコア範囲が定義されていないため、統計を算出できません。")
-        return
+        return None
 
     stats = build_score_range_stats(res_df, min_score=band.min_score, max_score=band.max_score)
 
     if stats["count"] == 0:
         st.caption("このスコア帯に該当する営業日は過去にありませんでした。")
-        return
+        return None
 
     row1 = st.columns(4)
     row1[0].metric("対象件数", f"{stats['count']}件")
@@ -440,9 +455,87 @@ def render_rating_history_stats(res_df: pd.DataFrame, grade: str) -> None:
     row2[2].metric("平均3ヶ月リターン", _fmt(stats["avg_return_3m"], suffix="%"))
     row2[3].metric("-10%以上下落率", _fmt(stats["down10_rate"], suffix="%"))
 
+    return stats
+
 
 # ────────────────────────────────────────────────
-# 閾値スライダー（要件④：維持。動的レンジ化のみ実施）
+# Confidence（信頼度）
+# ────────────────────────────────────────────────
+def render_confidence_section(stats: dict) -> None:
+    """
+    過去実績統計(stats)から算出したConfidence（信頼度）を表示する。
+
+    Confidenceの算出ロジックはすべてbacktest/confidence.pyに委譲しており、
+    このファイルはbuild_confidence()の戻り値をそのまま表示するだけ。
+    Scoreやrating.pyのGrade文字列は一切参照していない
+    （confidence.py側の「statsのみに依存する」という設計原則を、
+    UI側でも壊さないよう意図的にstatsのみを渡している）。
+
+    Confidenceの内訳（どの因子が強み/弱みか）は
+    backtest/confidence_explain.py（新規・confidence.pyとは責務分離）
+    に委譲し、render_confidence_breakdown()で表示する。
+    """
+    st.markdown("##### 🛡️ Confidence（この評価の信頼度）")
+    st.caption("Scoreそのものではなく、このスコア帯の過去統計がどれだけ再現性を持つかを示します。")
+
+    confidence = build_confidence(stats)
+    stars = _confidence_stars(confidence["score"])
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Confidence", confidence["confidence"])
+    col2.metric("信頼度スコア", f"{confidence['score']} / 100")
+    col3.metric("★評価", stars)
+
+    if confidence["reasons"]:
+        st.markdown("**理由**")
+        for r in confidence["reasons"]:
+            st.caption(f"・{r}")
+
+    with st.expander("build_confidence() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(confidence)
+
+    render_confidence_breakdown(confidence)
+
+
+def render_confidence_breakdown(confidence: dict) -> None:
+    """
+    Confidenceの内訳（因子ごとのscore/weight/comment/classification）を
+    st.progress() の横棒で可視化する。
+
+    算出ロジックはすべて confidence_explain.build_confidence_explanation()
+    に委譲しており、このファイルは戻り値をそのまま表示するだけ。
+    """
+    st.markdown("###### 🔬 Confidenceの内訳（どこが強く、どこが弱いか）")
+
+    explanation = build_confidence_explanation(confidence)
+
+    classification_icon = {"strength": "🟢", "neutral": "🟡", "weakness": "🔴"}
+
+    for item in explanation["items"]:
+        icon = classification_icon.get(item["classification"], "⚪")
+        col_label, col_bar, col_score = st.columns([2, 4, 1])
+        with col_label:
+            st.markdown(f"{icon} **{item['name']}**")
+            st.caption(f"重み: {item['weight']:.0f}")
+        with col_bar:
+            st.progress(min(max(item["score"], 0), 100) / 100)
+            st.caption(item["comment"])
+        with col_score:
+            st.metric("", f"{item['score']:.0f}", label_visibility="collapsed")
+
+    with st.expander("build_confidence_explanation() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(explanation)
+
+
+def _confidence_stars(score: float) -> str:
+    """信頼度スコア(0〜100)を★の数(0〜5)に変換する表示専用ヘルパー。"""
+    filled = round(score / 20)
+    filled = max(0, min(5, filled))
+    return "★" * filled + "☆" * (5 - filled)
+
+
+# ────────────────────────────────────────────────
+# 閾値スライダー（動的レンジ）
 # ────────────────────────────────────────────────
 def _compute_threshold_range(res_df: pd.DataFrame, score_col: str = "total") -> tuple[int, int]:
     """
@@ -532,7 +625,7 @@ def render_metrics_overview(res_df: pd.DataFrame, filtered_df: pd.DataFrame,
 
 
 # ────────────────────────────────────────────────
-# 感度分析グラフ（要件④：維持。動的レンジ化のみ実施）
+# 感度分析グラフ（動的レンジ）
 # ────────────────────────────────────────────────
 def render_threshold_analysis(res_df: pd.DataFrame) -> None:
     """
