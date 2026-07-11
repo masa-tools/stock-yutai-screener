@@ -4,21 +4,22 @@ backtest/debug_ui.py  (v9研究開発ブランチ Phase3 - 研究・検証基盤
 Step1バックテストの結果をブラウザ（Streamlit）から確認するための
 開発・検証専用UI層。
 
-【今回の追加（Evaluation Lab: History/Benchmarkの実データ供給）】
-  render_evaluation_hub_section() 内でDecision Report生成後に
-  report_history.build_history_entry()（無変更）を呼び、結果を
-  st.session_state["evaluation_history"]（最大20件、古いものから
-  自動削除）へ蓄積するようにした。同一(銘柄,期間,ロジック)の組み合わせ
-  では再描画のたびに重複登録しないよう、combo→run_idの索引を持たせて
-  いる。履歴が2件以上ある場合のみ、比較対象取得を独立関数
-  _select_benchmark_pair() で取得し、直近2件を benchmark.build_benchmark()
-  （無変更）に渡した結果を evaluation.render_evaluation_lab() へ供給する。
-  History Summaryには生の履歴全件ではなく、run_id/timestamp/strategy/
-  code/config_hash等の軽量情報のみを抽出したリストを渡す。
-  report_history.py・benchmark.py・evaluation.py・decision.py・
-  decision_pipeline.py・decision_report.py・decision_validation.py・
-  rating.py・confidence.py・confidence_explain.py・statistics.py・
-  metrics.py・comparison.py・strategy_v8/v9・app.pyは一切変更していない。
+【今回の追加（Evaluation Lab: 正式インターフェースへの接続）】
+  evaluation.render_evaluation_lab() の正式シグネチャ
+  （rating_result / confidence_result / decision_result /
+  decision_report / benchmark_result / history_entries /
+  benchmarks_by_run_id / context）に合わせて呼び出し箇所を修正した。
+  引数名の不整合（旧: "benchmarks"）を解消し、すべての引数を
+  Noneのまま渡しても安全に動作する（evaluation.py側で正規化される）
+  構成にしている。debug_ui.py側はEvaluation Labへ必要なデータを
+  渡すだけ、evaluation.py側は受け取ったデータを表示用dictへ
+  変換するだけ、という役割分担は維持している。
+
+  rating.py・statistics.py・confidence.py・confidence_explain.py・
+  decision.py・decision_pipeline.py・decision_validation.py・
+  decision_report.py・benchmark.py・report_history.py・
+  strategy_v8.py・strategy_v9.py・metrics.py・comparison.py・
+  app.pyは一切変更していない。
 
 【設計方針】
   backtest/ 配下の既存ロジックには一切変更を加えず、それらを
@@ -37,8 +38,8 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
     10. Decision Card（render_decision_card。decision.pyの薄いラッパー）
     11. Evaluation Lab（評価実験基盤）（render_evaluation_lab。evaluation.pyの薄いラッパー）
     12. Evaluation Lab（分析・検証ハブ）（render_evaluation_hub_section。
-        evaluation.render_evaluation_lab()の薄いラッパー。
-        History/Benchmarkの実データ供給を含む）★今回拡張
+        evaluation.render_evaluation_lab()の正式インターフェースへの
+        薄いラッパー。History/Benchmarkの実データ供給を含む）
   将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
   追加するだけで比較対象に組み込める（他の層は変更不要）。
 
@@ -1152,9 +1153,10 @@ def _build_lightweight_history_rows(history: list[dict]) -> list[dict]:
 def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
                                    rating_bundle: dict | None) -> None:
     """
-    evaluation.render_evaluation_lab()（Rating→Confidence→Decision→
-    Decision Report→Benchmark→History Summaryの表示用dictを組み立てる
-    オーケストレーター）を呼び出し、その戻り値をそのまま表示する。
+    evaluation.render_evaluation_lab()（正式インターフェース。
+    Rating→Confidence→Decision→Decision Report→Benchmark→History
+    Summaryの表示用dictを組み立てるオーケストレーター）を呼び出し、
+    その戻り値をそのまま表示する。
 
     Rating/Confidence/Decisionはrating_bundle（render_rating_card内で
     既に計算済み）をそのまま渡し、再計算しない。Decision Reportは
@@ -1167,6 +1169,11 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
     直近2件（_select_benchmark_pair）をbenchmark.build_benchmark()に
     渡して比較する。History Summaryには軽量化した履歴一覧
     （_build_lightweight_history_rows）のみを渡す。
+
+    render_evaluation_lab()へは正式引数名（history_entries /
+    benchmarks_by_run_id）で渡す。いずれの引数もNoneのまま渡しても
+    evaluation.py側で安全に正規化されるため、ここでの明示的な
+    Noneチェックは不要。
 
     st.expander で折りたたみ、通常のバックテスト閲覧を邪魔しないように
     している。将来Streamlit以外の画面（本番画面・レポート生成画面等）へ
@@ -1214,7 +1221,7 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
         benchmarks_by_run_id: dict[str, dict] = {}
 
         try:
-            history_entry = _get_or_create_history_entry(res_df, meta, decision_report_result)
+            _get_or_create_history_entry(res_df, meta, decision_report_result)
             history: list[dict] = st.session_state.get(_SS_KEY_HISTORY, [])
 
             pair = _select_benchmark_pair(history)
@@ -1236,8 +1243,8 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
             decision_result=decision,
             decision_report=decision_report_result,
             benchmark_result=benchmark_result,
-            history_entries=history_rows if history_rows else None,
-            benchmarks=benchmarks_by_run_id if benchmarks_by_run_id else None,
+            history_entries=history_rows,
+            benchmarks_by_run_id=benchmarks_by_run_id,
         )
 
         _render_eval_rating(lab.get("rating"))
@@ -1251,6 +1258,8 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
         _render_eval_benchmark(lab.get("benchmark"), note=benchmark_note)
         st.divider()
         _render_eval_history(lab.get("history_summary"))
+
+        st.caption(f"Evaluation Lab schema version: {lab.get('evaluation_schema_version', '―')}")
 
 
 def _render_eval_rating(view: dict | None) -> None:
