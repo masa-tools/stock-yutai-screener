@@ -1,245 +1,162 @@
 """
-backtest/evaluation.py (v9研究開発ブランチ Evaluation Lab)
+backtest/debug_ui.py  (v9研究開発ブランチ Phase3 - 研究・検証基盤)
 ====================================================================
-v9_config.py のパラメータ調整による影響を比較検証するための
-「評価実験基盤（Evaluation Lab）」の分析ロジック層。
+Step1バックテストの結果をブラウザ（Streamlit）から確認するための
+開発・検証専用UI層。
+
+【今回の追加（Evaluation Lab: 分析・検証ハブの画面接続）】
+  evaluation.render_evaluation_lab()（①Rating→②Confidence→③Decision→
+  ④Decision Report→⑤Benchmark→⑥History Summary の順で表示用dictを
+  組み立てるオーケストレーター）を呼び出し、その戻り値をそのまま
+  Streamlitへ表示する render_evaluation_hub_section() を追加した。
+
+  Rating/Confidence/Decisionは render_rating_card / render_confidence_section /
+  render_decision_card が既に計算済みの値をそのまま再利用しており、
+  再計算は行わない。Decision Reportのみ decision_pipeline.attach_decision_columns()
+  → decision_report.build_decision_report() という既存モジュールの
+  呼び出し（新しい計算ロジックの実装ではない）で組み立てる。
+  Benchmark・Historyは今回のフェーズでは実データを持たないため
+  Noneを渡し、フォールバック表示（「まだ未評価です」等）に委ねている。
+
+  evaluation.py・rating.py・confidence.py・confidence_explain.py・
+  decision.py・decision_pipeline.py・decision_report.py・
+  decision_validation.py・report_history.py・benchmark.py・
+  statistics.py・comparison.py・metrics.py・strategy_v8/v9・app.py は
+  一切変更していない。
 
 【設計方針】
-  Streamlit依存を持たない純粋関数のみ。
-  新しい統計計算ロジックは追加せず、既存の
-    metrics.describe_score_distribution
-    rating.DEFAULT_RATING_CONFIG
-    statistics.build_score_range_stats
-    confidence.build_confidence
-    comparison.build_comparison_summary
-    decision.build_decision（呼び出しは行わず、戻り値のみを受け取る）
-    decision_report.build_decision_report（同上）
-    report_history.build_history_entry（同上）
-    benchmark.build_benchmark（同上）
-  をすべて再利用する「呼び出し・集約・整形」層として実装している
-  （strategy_v8/v9/backtest_runner等のロジックには一切依存しない）。
+  backtest/ 配下の既存ロジックには一切変更を加えず、それらを
+  呼び出すだけのUI層とする。ロジックの再実装・重複実装は行わない。
 
-  v9_config.py については、現在の設定値を「読み取る」ためだけに
-  importしており、値を変更する処理は一切持たない
-  （Evaluation Labは既存の値を可視化するだけで、パラメータの
-  変更自体は引き続きGitHub上でv9_config.pyを直接編集して行う想定）。
+  このファイル内も以下の層に責務分離している。
+    1. 設定・レジストリ（STOCK_CANDIDATES / PERIOD_OPTIONS / STRATEGY_REGISTRY）
+    2. 選択UI（render_condition_selectors）
+    3. 実行・キャッシュ管理（_execute_and_cache / セッションキャッシュ）
+    4. 分析・描画（render_* 関数群。DataFrameを受け取って表示するだけ）
+    5. v8/v9比較（render_comparison_section。comparison.pyの薄いラッパー）
+    6. 評価変換層の動作確認（render_rating_card。rating.pyの薄いラッパー）
+    7. 評価グレードの過去実績統計（render_rating_history_stats。statistics.pyの薄いラッパー）
+    8. Confidence（render_confidence_section。confidence.pyの薄いラッパー）
+    9. Confidenceの内訳可視化（render_confidence_breakdown。confidence_explain.pyの薄いラッパー）
+    10. Decision Card（render_decision_card。decision.pyの薄いラッパー）
+    11. Evaluation Lab（旧・評価実験基盤）（render_evaluation_lab。evaluation.pyの薄いラッパー）
+    12. Evaluation Lab（分析・検証ハブ）（render_evaluation_hub_section。
+        evaluation.render_evaluation_lab()の薄いラッパー）★今回追加
+  将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
+  追加するだけで比較対象に組み込める（他の層は変更不要）。
 
-【Evaluation Lab: 分析・検証ハブとしての役割】
-  ①Rating → ②Confidence → ③Decision → ④Decision Report →
-  ⑤Benchmark → ⑥History Summary という一連の分析パイプラインの
-  結果を統合して表示するためのview（表示用データ）を組み立てるのが
-  render_* 関数群の役割。各render_*関数は「対応するモジュールの
-  戻り値dictを受け取り、表示に必要な項目だけを抜粋・整形して
-  返すだけ」であり、内部でDecision Engine・Confidence算出・
-  Benchmark計算・履歴生成等を呼び出すことは一切しない
-  （＝計算は行わず、既に計算済みの結果を整形するだけ）。
+  ※ 11.と12.は名称がどちらも「Evaluation Lab」だが別セクションである。
+    11.は v9_config.py のパラメータ調整の影響検証（設定値・Score分布・
+    Confidence分布・閾値影響・銘柄比較）を目的とした従来の実験基盤。
+    12.は Rating→Confidence→Decision→Decision Report→Benchmark→History
+    という分析パイプライン全体の結果を統合表示する新しいハブ。
+    両者は独立しており、互いのセクションを変更・削除していない。
 
-  各render_*関数はStreamlit等のUIライブラリに一切依存しない
-  純粋なdict変換関数のため、debug_ui.py（Streamlit）だけでなく、
-  将来の本番画面・PDF/HTMLレポート生成等、異なる表示先からも
-  同じ関数をそのまま再利用できる。
+【重要：バックテストは「選択した条件ごとに」一度だけ実行】
+  「▶ 実行」ボタンを押したときのみ、選択中の (銘柄, 期間, ロジック) の
+  組み合わせについてバックテストを実行し、結果をセッション内キャッシュ
+  （キー: (code, period, strategy_key)）に保存する。
+  同じ組み合わせであれば再実行せずキャッシュを再利用するため、
+  銘柄・期間・ロジックを切り替えながらの比較検証時に、
+  無駄なyfinance呼び出しやスコア再計算が発生しない。
+  閾値スライダーの変更等でもバックテストは一切再実行しない。
 
-【今回のスコープ】
-  Decision（最終投資判断）そのものの実装や、Score/Rating/Confidence/
-  Decision/Benchmark/Historyの計算ロジック自体は今回のスコープ外
-  （それぞれ対応する既存モジュールの責務）。
+【削除容易性について】
+  このファイル1つに開発用UIロジックを集約している。
+  将来的にStep1デバッグ機能を削除する場合は、以下の2箇所を
+  戻すだけで完全に削除できる：
+    1. このファイル（backtest/debug_ui.py）を削除
+    2. app.py の「Step1バックテスト（開発用）」タブ追加部分
+       （render_step1_debug_tab の import 1行 + タブ定義1行 +
+       with tab6: の1行）を削除
+  既存5タブ・既存4系統のスコアリングロジックには
+  一切影響しないため、削除時の副作用はない。
 """
 
-from __future__ import annotations
+import math
+import traceback
 
-from typing import Any, Optional
-
-import numpy as np
 import pandas as pd
+import streamlit as st
 
-from backtest import v9_config as cfg
+from backtest.data_loader import fetch_stock_data
+from backtest.strategy_v8 import compute_score_at as compute_score_at_v8
+from backtest.strategy_v9 import compute_score_at_v9
+from backtest.backtest_runner import run_backtest, REQUIRED_HISTORY_DAYS
+from backtest.metrics import (
+    filter_by_threshold,
+    calc_max_drawdown,
+    calc_down10_rate,
+    describe_score_distribution,
+    build_threshold_analysis,
+)
 from backtest import comparison
-from backtest.metrics import describe_score_distribution
-from backtest.rating import DEFAULT_RATING_CONFIG, RatingConfig
+from backtest.rating import build_rating_from_score_result, DEFAULT_RATING_CONFIG
 from backtest.statistics import build_score_range_stats
-from backtest.confidence import build_confidence, DEFAULT_CONFIDENCE_CONFIG, ConfidenceConfig
+from backtest.confidence import build_confidence
+from backtest.confidence_explain import build_confidence_explanation
+from backtest.decision import build_decision
+from backtest.decision_pipeline import attach_decision_columns
+from backtest.decision_report import build_decision_report
+from backtest import evaluation
 
 
 # ════════════════════════════════════════════════
-# ① Evaluation Summary（現在の設定値のスナップショット）
+# 1. 設定・レジストリ
 # ════════════════════════════════════════════════
-def get_v9_config_snapshot() -> dict:
-    """
-    v9_config.py の現在値をスナップショットとして取得する（読み取り専用）。
 
-    v9_config.py に将来定数が追加された場合も、大文字の
-    モジュールレベル変数を自動的に拾うため、本関数の変更は不要。
-    """
-    snapshot = {}
-    for name in dir(cfg):
-        if name.startswith("_") or not name.isupper():
-            continue
-        value = getattr(cfg, name)
-        if callable(value):
-            continue
-        snapshot[name] = value
-    return snapshot
+# ── 銘柄候補（要件①） ──────────────────────────
+# 選択肢を増やす場合は、この辞書に1行追加するだけでよい。
+STOCK_CANDIDATES: dict[str, str] = {
+    "7203": "トヨタ自動車",
+    "8035": "東京エレクトロン",
+    "6857": "アドバンテスト",
+    "8058": "三菱商事",
+    "8306": "三菱UFJ",
+}
+DEFAULT_CODE = "7203"
 
+# ── 期間候補（要件②） ──────────────────────────
+# 表示ラベル → data_loader.fetch_stock_data() にそのまま渡すyfinance period文字列。
+# data_loader.py は元々period引数を汎用的に受け取れる構成のため、変更不要。
+PERIOD_OPTIONS: dict[str, str] = {
+    "1年": "1y",
+    "2年": "2y",
+    "3年": "3y",
+    "5年": "5y",
+}
+DEFAULT_PERIOD_LABEL = "1年"
 
-# ════════════════════════════════════════════════
-# ② Score分布（ヒストグラム・件数・中央値・平均・標準偏差）
-# ════════════════════════════════════════════════
-def build_score_distribution_summary(res_df: pd.DataFrame, score_col: str = "total",
-                                      bins: int = 10) -> dict:
-    """
-    describe_score_distribution()（metrics.py・無変更）に、
-    標準偏差とヒストグラム用のbin情報を加えて返す。
-    """
-    empty = {
-        "count": 0, "mean": None, "median": None, "min": None, "max": None,
-        "q25": None, "q75": None, "std": None, "bin_edges": [], "bin_counts": [],
-    }
-    if res_df.empty or score_col not in res_df.columns:
-        return empty
+# ── スコアリングロジック候補（要件⑤：将来のv8/v9/v10比較への布石） ──
+# 「戦略キー → (表示名, compute_fn)」の登録テーブル。
+# strategy_v10.py 等を追加する場合は、ここに1行追加するだけでよく、
+# strategy_v8.py / strategy_v9.py 側の変更は一切不要。
+# compute_fn はすべて (window_df, info, code) -> dict の共通シグネチャ
+# （backtest_runner.run_backtest の strategy_fn 引数にそのまま渡せる）。
+STRATEGY_REGISTRY: dict[str, dict] = {
+    "v9": {"label": "v9（v8ベース＋加減点）", "compute_fn": compute_score_at_v9},
+    "v8": {"label": "v8（既存ロジックのみ）", "compute_fn": compute_score_at_v8},
+}
+DEFAULT_STRATEGY_KEY = "v9"
 
-    valid = res_df[score_col].dropna()
-    if valid.empty:
-        return empty
+# ── 閾値スライダーの設定 ────────────────────────
+# v8/v9でスコアの取りうる範囲が異なるため、固定値ではなく
+# 実際のres_dfのスコア分布から動的に算出する（_compute_threshold_range参照）。
+# 以下はres_dfが空等で動的算出できない場合のフォールバック値。
+THRESHOLD_MIN_FALLBACK = 0
+THRESHOLD_MAX_FALLBACK = 100
+THRESHOLD_STEP = 1
 
-    dist = describe_score_distribution(res_df, score_col=score_col)
-    std = float(valid.std()) if len(valid) > 1 else 0.0
+# ── セッションキャッシュのキー ──────────────────
+# 値は {(code, period_code, strategy_key): (res_df, meta)} の辞書。
+# 同じ組み合わせで再実行してもyfinance呼び出し・スコア再計算が
+# 発生しないようにするための、条件ごとのキャッシュ。
+_SS_KEY_CACHE = "step1_results_cache"
 
-    counts, edges = np.histogram(valid, bins=bins)
-
-    return {
-        **dist,
-        "std": std,
-        "bin_edges": [float(e) for e in edges],
-        "bin_counts": [int(c) for c in counts],
-    }
-
-
-# ════════════════════════════════════════════════
-# ③ Confidence分布（グレード別 → High/Medium/Low集計）
-# ════════════════════════════════════════════════
-def build_confidence_distribution(res_df: pd.DataFrame,
-                                   rating_config: RatingConfig = DEFAULT_RATING_CONFIG,
-                                   confidence_config: ConfidenceConfig = DEFAULT_CONFIDENCE_CONFIG,
-                                   score_col: str = "total") -> dict:
-    """
-    rating.pyの各グレード帯について過去統計(statistics.py)→Confidence(confidence.py)
-    を算出し、判定対象営業日をグレード別に分類したうえで、
-    Confidenceラベル（High/Medium/Low）別の日数・割合を集計する。
-
-    「その日がどのグレードに属するか」自体は日次で判定しているが、
-    Confidence自体はグレード（スコア帯）単位で1つ算出される値であり、
-    日ごとに異なるConfidenceを個別算出しているわけではない
-    （confidence.py の設計上、Confidenceはスコア帯の再現性を表す指標のため）。
-    """
-    total_days = len(res_df)
-    if res_df.empty or score_col not in res_df.columns:
-        return {"total_days": 0, "by_grade": {}, "by_confidence_days": {}, "by_confidence_pct": {}}
-
-    by_grade = {}
-    confidence_day_counts: dict[str, int] = {}
-
-    for band in rating_config.grade_bands:
-        stats = build_score_range_stats(res_df, min_score=band.min_score,
-                                         max_score=band.max_score, score_col=score_col)
-        conf = build_confidence(stats, config=confidence_config)
-        label = rating_config.grade_labels.get(band.grade, band.grade)
-
-        by_grade[band.grade] = {
-            "label": label,
-            "days": stats["count"],
-            "ratio_pct": stats["ratio_pct"],
-            "confidence": conf["confidence"],
-            "confidence_score": conf["score"],
-        }
-        confidence_day_counts[conf["confidence"]] = (
-            confidence_day_counts.get(conf["confidence"], 0) + stats["count"]
-        )
-
-    by_confidence_pct = {
-        k: (v / total_days * 100 if total_days > 0 else None)
-        for k, v in confidence_day_counts.items()
-    }
-
-    return {
-        "total_days": total_days,
-        "by_grade": by_grade,
-        "by_confidence_days": confidence_day_counts,
-        "by_confidence_pct": by_confidence_pct,
-    }
-
-
-# ════════════════════════════════════════════════
-# ④ 閾値変更の影響比較
-# ════════════════════════════════════════════════
-def build_threshold_impact_table(res_df: pd.DataFrame, thresholds: list[float],
-                                  score_col: str = "total") -> pd.DataFrame:
-    """
-    複数の閾値それぞれについて statistics.build_score_range_stats()
-    （min_score=threshold, max_score=None＝「その点数以上」）を呼び出し、
-    1行=1閾値の比較表を作る。
-
-    「Strong Buyの閾値を90→85に変えたら対象件数・平均利益・DDが
-    どう変わるか」を比較する用途を想定している。
-    """
-    rows = []
-    for th in thresholds:
-        stats = build_score_range_stats(res_df, min_score=th, max_score=None, score_col=score_col)
-        rows.append({
-            "threshold": th,
-            "count": stats["count"],
-            "ratio_pct": stats["ratio_pct"],
-            "win_rate": stats["win_rate"],
-            "avg_return_1w": stats["avg_return_1w"],
-            "avg_return_1m": stats["avg_return_1m"],
-            "avg_return_3m": stats["avg_return_3m"],
-            "max_drawdown": stats["max_drawdown"],
-            "down10_rate": stats["down10_rate"],
-        })
-    return pd.DataFrame(rows)
-
-
-# ════════════════════════════════════════════════
-# ⑤ 銘柄比較（Statistics / Confidence）
-# ════════════════════════════════════════════════
-def build_multi_stock_comparison(stock_results: dict[str, dict]) -> dict:
-    """
-    複数銘柄のバックテスト結果を横並びで比較する。
-
-    Args:
-        stock_results: {表示ラベル: {"res_df":..., "filtered_df":...,
-                                       "threshold":..., "label":...}}
-
-    comparison.build_comparison_summary()（既存・無変更）はキーが
-    strategy名か銘柄名かを問わない汎用設計のため、そのまま流用できる。
-    それに加えて、各銘柄について statistics + confidence を算出し、
-    Confidence列として合成する。
-    """
-    summary = comparison.build_comparison_summary(stock_results)
-
-    for key, r in stock_results.items():
-        res_df = r["res_df"]
-        threshold = r.get("threshold")
-        stats = build_score_range_stats(res_df, min_score=threshold, max_score=None)
-        conf = build_confidence(stats)
-        summary[key]["confidence"] = conf["confidence"]
-        summary[key]["confidence_score"] = conf["score"]
-
-    return summary
-
-
-# ════════════════════════════════════════════════
-# Evaluation Lab: 分析・検証ハブ（★今回追加）
-# ════════════════════════════════════════════════
-#
-# 以下の render_* 関数群は、rating.py / confidence.py / decision.py /
-# decision_report.py / benchmark.py / report_history.py の戻り値dictを
-# 受け取り、表示用に整形したdictを返すだけの純粋関数である。
-# いずれも新しい計算・Decision再計算・Report再計算・Benchmark再計算は
-# 行わない。呼び出し側（debug_ui.py等）が各モジュールの build_*() /
-# compute_*() 関数を実行した結果を、そのままここへ渡す想定。
-
-# Decisionラベル → 表示用の★数（0〜5）。判断ロジックではなく、
-# 表示上の見た目を決めるだけのマッピング。
+# ── Decision表示用の★マッピング（表示専用。判断ロジックではない） ──
+# decision.build_decision() が返す "decision" 文字列を★の数に変換するだけの
+# 表示ヘルパー。判断そのものはdecision.py側のマトリクスが決めており、
+# ここでは見た目の表現のみを扱う。
 _DECISION_STARS: dict[str, int] = {
     "Strong Buy": 5,
     "Buy": 4,
@@ -248,251 +165,1186 @@ _DECISION_STARS: dict[str, int] = {
 }
 
 
-def _score_to_stars(score: Optional[float], max_stars: int = 5, max_score: float = 100.0) -> Optional[int]:
-    """0〜max_scoreのスコアを0〜max_starsの★数に変換する表示専用ヘルパー。
+# ════════════════════════════════════════════════
+# エントリポイント（app.pyから呼ばれる唯一の公開関数）
+# ════════════════════════════════════════════════
+def render_step1_debug_tab() -> None:
+    """
+    Step1バックテストの開発・検証用デバッグタブを描画する。
 
-    Args:
-        score: 変換元のスコア（Noneの場合はNoneをそのまま返す）。
-        max_stars: ★の最大数。
-        max_score: scoreの取りうる最大値。
+    銘柄・期間・ロジックを選択し「▶ 実行」ボタンを押した組み合わせについて
+    のみバックテストを実行する。同じ組み合わせはセッション内キャッシュから
+    即座に再表示され、閾値スライダー等の操作ではバックテストを再実行しない。
+    """
+    st.markdown("### 🧪 Step1バックテスト（開発・検証専用・研究基盤）")
+    st.caption(
+        "銘柄・期間・スコアリングロジックを切り替えながら比較検証できます。"
+        " / 全営業日判定方式"
+    )
+    st.warning(
+        "⚠️ このタブは開発・検証専用です。一般利用者向けの機能ではありません。",
+        icon="🧪",
+    )
+
+    code, period_label, period_code, strategy_key = render_condition_selectors()
+
+    run_clicked = st.button("▶ 実行", key="step1_debug_run")
+
+    if run_clicked:
+        try:
+            _execute_and_cache(code, period_label, period_code, strategy_key)
+        except Exception:
+            st.error("❌ バックテスト実行中にエラーが発生しました。")
+            st.code(traceback.format_exc(), language="text")
+            return
+
+    st.divider()
+    render_comparison_section(code, period_code, period_label)
+    st.divider()
+
+    cache = st.session_state.get(_SS_KEY_CACHE, {})
+    cache_key = (code, period_code, strategy_key)
+
+    if cache_key not in cache:
+        st.info(
+            f"「{code} {STOCK_CANDIDATES[code]}」/「{period_label}」/"
+            f"「{STRATEGY_REGISTRY[strategy_key]['label']}」の組み合わせは"
+            "まだ実行されていません。「▶ 実行」ボタンを押してください。"
+        )
+        return
+
+    res_df, meta = cache[cache_key]
+
+    try:
+        _render_results(res_df, meta)
+    except Exception:
+        st.error("❌ 結果表示中にエラーが発生しました。")
+        st.code(traceback.format_exc(), language="text")
+
+
+# ════════════════════════════════════════════════
+# 2. 選択UI（銘柄・期間・ロジック）
+# ════════════════════════════════════════════════
+def render_condition_selectors() -> tuple[str, str, str, str]:
+    """
+    銘柄・期間・スコアリングロジックの選択UIを描画し、選択値を返す。
 
     Returns:
-        0〜max_starsに丸めた整数。scoreがNoneの場合はNone。
+        (code, period_label, period_code, strategy_key)
     """
-    if score is None:
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        code = st.selectbox(
+            "対象銘柄",
+            options=list(STOCK_CANDIDATES.keys()),
+            index=list(STOCK_CANDIDATES.keys()).index(DEFAULT_CODE),
+            format_func=lambda c: f"{c} {STOCK_CANDIDATES[c]}",
+            key="step1_code_select",
+        )
+
+    with col2:
+        period_label = st.selectbox(
+            "対象期間",
+            options=list(PERIOD_OPTIONS.keys()),
+            index=list(PERIOD_OPTIONS.keys()).index(DEFAULT_PERIOD_LABEL),
+            key="step1_period_select",
+        )
+
+    with col3:
+        strategy_key = st.selectbox(
+            "スコアリングロジック",
+            options=list(STRATEGY_REGISTRY.keys()),
+            index=list(STRATEGY_REGISTRY.keys()).index(DEFAULT_STRATEGY_KEY),
+            format_func=lambda k: STRATEGY_REGISTRY[k]["label"],
+            key="step1_strategy_select",
+        )
+
+    period_code = PERIOD_OPTIONS[period_label]
+    return code, period_label, period_code, strategy_key
+
+
+# ════════════════════════════════════════════════
+# 3. 実行・キャッシュ管理
+# ════════════════════════════════════════════════
+def _execute_and_cache(code: str, period_label: str, period_code: str,
+                        strategy_key: str) -> None:
+    """
+    選択中の (銘柄, 期間, ロジック) でバックテストを実行し、
+    結果をセッション内キャッシュに保存する。
+
+    この関数は「▶ 実行」ボタンが押された時のみ呼ばれる。
+    閾値スライダー等の操作からは呼ばれない。
+    """
+    st.info("⏳ 実行開始...")
+
+    df, info = fetch_stock_data(code, period=period_code)
+
+    if df is None or df.empty:
+        st.error("データ取得に失敗しました。処理を中断します。")
+        return
+
+    st.success("✅ データ取得完了")
+
+    compute_fn = STRATEGY_REGISTRY[strategy_key]["compute_fn"]
+    res_df = run_backtest(df, info, code, compute_fn)
+
+    if res_df.empty:
+        st.error(
+            "バックテスト結果が空です。データ期間が短すぎる可能性があります。"
+        )
+        return
+
+    meta = {
+        "code": code,
+        "stock_name": STOCK_CANDIDATES.get(code, ""),
+        "period_label": period_label,
+        "period_code": period_code,
+        "strategy_key": strategy_key,
+        "strategy_label": STRATEGY_REGISTRY[strategy_key]["label"],
+        "raw_days": len(df),
+        "judged_days": len(res_df),
+        "period_start": df.index[0],
+        "period_end": df.index[-1],
+        "required_history_days": REQUIRED_HISTORY_DAYS,
+    }
+
+    cache = st.session_state.setdefault(_SS_KEY_CACHE, {})
+    cache[(code, period_code, strategy_key)] = (res_df, meta)
+
+    st.success("✅ 実行完了")
+
+
+# ════════════════════════════════════════════════
+# 4. 結果表示の統括（session_state上のres_dfのみを使用）
+# ════════════════════════════════════════════════
+def _render_results(res_df: pd.DataFrame, meta: dict) -> None:
+    """
+    バックテスト結果を表示する。バックテストの再実行は行わない。
+
+    UI部品は render_* 関数へ分離しており、それぞれ
+    「DataFrameを受け取って表示するだけ」の責務に限定している。
+    strategy固有の条件分岐は持たない。
+    """
+    render_summary_meta(meta)
+
+    st.divider()
+    rating_bundle = render_rating_card(res_df)
+
+    st.divider()
+    threshold = render_threshold_slider(res_df)
+
+    st.divider()
+    filtered_df = filter_results(res_df, threshold)
+    render_metrics_overview(res_df, filtered_df, threshold)
+
+    st.divider()
+    render_threshold_analysis(res_df)
+
+    st.divider()
+    render_filtered_table(filtered_df)
+
+    st.divider()
+    render_evaluation_lab(res_df, meta)
+
+    st.divider()
+    render_evaluation_hub_section(res_df, meta, rating_bundle)
+
+    st.divider()
+    render_cache_controls()
+
+
+# ────────────────────────────────────────────────
+# 実行条件のメタ情報
+# ────────────────────────────────────────────────
+def render_summary_meta(meta: dict) -> None:
+    """データ取得時のメタ情報（銘柄・期間・ロジック・営業日数等）を表示する。"""
+    st.markdown(
+        f"#### 📌 実行条件: {meta['code']}（{meta['stock_name']}） / "
+        f"{meta['period_label']} / {meta['strategy_label']}"
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("取得した営業日数", f"{meta['raw_days']}日")
+    with col2:
+        st.metric("判定対象営業日数", f"{meta['judged_days']}日")
+    with col3:
+        st.metric("REQUIRED_HISTORY_DAYS", meta["required_history_days"])
+
+    st.caption(
+        f"期間: {meta['period_start'].date()} 〜 {meta['period_end'].date()}"
+    )
+
+
+# ────────────────────────────────────────────────
+# 評価変換層（rating.py）の動作確認カード
+# ────────────────────────────────────────────────
+def render_rating_card(res_df: pd.DataFrame) -> dict | None:
+    """
+    現在表示中のバックテスト結果のうち、最新営業日（判定対象期間の最終日＝
+    「今日時点」に相当する行）のスコアを rating.build_rating_from_score_result()
+    に通し、評価変換層が期待通りの判定を返しているかを目視確認するための
+    カードを表示する。
+
+    Grade/Label/Score・componentsの生データに加え、そのグレードの
+    スコア範囲についての過去実績統計（render_rating_history_stats）と、
+    その統計から算出したConfidence（render_confidence_section）、
+    Decision（render_decision_card）を直下に表示する。
+
+    Returns:
+        {"rating": rating辞書, "stats": stats辞書, "confidence": confidence辞書,
+         "decision": decision辞書} の形の束。res_dfが空、またはstats/confidence/
+        decisionのいずれかが算出できなかった場合はNoneを返す
+        （呼び出し側でEvaluation Lab（分析・検証ハブ）へ渡すかどうかの
+        判断に使う。既存の計算結果を再利用するだけで、再計算はしない）。
+    """
+    st.markdown("#### 🧾 評価変換層 動作確認（rating.py）")
+    st.caption(
+        "判定対象期間の最終営業日（最新日）のスコアを rating.py で変換した結果です。"
+        " ※現時点では説明文（reasons/strengths/cautions）は未実装のため空になります。"
+    )
+
+    if res_df.empty:
+        st.info("バックテスト結果が空のため、評価変換を実行できません。")
         return None
-    stars = round(score / max_score * max_stars)
-    return max(0, min(max_stars, stars))
+
+    latest_row = res_df.iloc[-1].to_dict()
+    rating = build_rating_from_score_result(latest_row)
+
+    date_val = latest_row.get("date")
+    date_label = date_val.date() if hasattr(date_val, "date") else str(date_val)
+    st.caption(f"対象日: {date_label}")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Grade", rating["grade"])
+    col2.metric("Label", rating["label"])
+    col3.metric("Score", _fmt(rating["score"]))
+
+    st.divider()
+    stats = render_rating_history_stats(res_df, rating["grade"])
+
+    confidence = None
+    decision = None
+    if stats is not None:
+        st.divider()
+        confidence = render_confidence_section(stats)
+
+    if stats is not None and confidence is not None:
+        st.divider()
+        decision = render_decision_card(rating, stats, confidence)
+
+    st.divider()
+
+    breakdown = rating["component_breakdown"]
+
+    bc1, bc2, bc3 = st.columns(3)
+    with bc1:
+        st.markdown("**Positive Components**")
+        if breakdown["positive"]:
+            st.dataframe(pd.DataFrame(breakdown["positive"]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("なし")
+    with bc2:
+        st.markdown("**Negative Components**")
+        if breakdown["negative"]:
+            st.dataframe(pd.DataFrame(breakdown["negative"]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("なし")
+    with bc3:
+        st.markdown("**Neutral Components**")
+        if breakdown["neutral"]:
+            st.dataframe(pd.DataFrame(breakdown["neutral"]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("なし")
+
+    with st.expander("build_rating() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(rating)
+
+    if stats is None or confidence is None or decision is None:
+        return None
+    return {"rating": rating, "stats": stats, "confidence": confidence, "decision": decision}
 
 
-def render_rating_view(rating_result: dict[str, Any]) -> dict[str, Any]:
-    """rating.build_rating() 系関数の戻り値を、表示用に抜粋・整形する。
+# ────────────────────────────────────────────────
+# 評価グレードの過去実績統計
+# ────────────────────────────────────────────────
+def render_rating_history_stats(res_df: pd.DataFrame, grade: str) -> dict | None:
+    """
+    評価カードが示すグレードのスコア範囲について、「このスコア帯は過去
+    どのような成績だったか」を backtest/statistics.build_score_range_stats()
+    （strategy非依存モジュール）で集計し、表示する。
 
-    Args:
-        rating_result: rating.build_rating() または
-            rating.build_rating_from_score_result() の戻り値。
+    このUI関数自体は集計ロジックを一切持たず、
+      1. rating.DEFAULT_RATING_CONFIG からグレードのスコア範囲(min/max)を引く
+      2. statistics.build_score_range_stats(res_df, min, max) を呼ぶ
+      3. 戻り値を表示する
+    という3ステップの薄いラッパーに留めている。
 
     Returns:
-        {"score", "grade", "label", "components"} を持つdict。
-        "components" は rating_result["component_breakdown"]
-        （positive/negative/neutralの分類済みリスト）をそのまま保持する。
+        算出したstats（build_score_range_statsの戻り値）。
+        グレード未定義・該当日0件の場合はNoneを返す
+        （呼び出し側でConfidence/Decision算出をスキップする判断に使う）。
     """
-    return {
-        "score": rating_result.get("score"),
-        "grade": rating_result.get("grade"),
-        "label": rating_result.get("label"),
-        "components": rating_result.get("component_breakdown", {}),
-    }
+    st.markdown("##### 📚 過去実績（この評価グレードのスコア帯）")
+
+    band = next((b for b in DEFAULT_RATING_CONFIG.grade_bands if b.grade == grade), None)
+    if band is None:
+        st.caption("このグレードにはスコア範囲が定義されていないため、統計を算出できません。")
+        return None
+
+    stats = build_score_range_stats(res_df, min_score=band.min_score, max_score=band.max_score)
+
+    if stats["count"] == 0:
+        st.caption("このスコア帯に該当する営業日は過去にありませんでした。")
+        return None
+
+    row1 = st.columns(4)
+    row1[0].metric("対象件数", f"{stats['count']}件")
+    row1[1].metric("全営業日に対する割合", _fmt(stats["ratio_pct"], suffix="%"))
+    row1[2].metric("勝率（1ヶ月後）", _fmt(stats["win_rate"], suffix="%"))
+    row1[3].metric("最大ドローダウン", _fmt(stats["max_drawdown"], suffix="%"))
+
+    row2 = st.columns(4)
+    row2[0].metric("平均1週間リターン", _fmt(stats["avg_return_1w"], suffix="%"))
+    row2[1].metric("平均1ヶ月リターン", _fmt(stats["avg_return_1m"], suffix="%"))
+    row2[2].metric("平均3ヶ月リターン", _fmt(stats["avg_return_3m"], suffix="%"))
+    row2[3].metric("-10%以上下落率", _fmt(stats["down10_rate"], suffix="%"))
+
+    return stats
 
 
-def render_confidence_view(confidence_result: dict[str, Any]) -> dict[str, Any]:
-    """confidence.build_confidence() の戻り値を、表示用に抜粋・整形する。
+# ────────────────────────────────────────────────
+# Confidence（信頼度）
+# ────────────────────────────────────────────────
+def render_confidence_section(stats: dict) -> dict:
+    """
+    過去実績統計(stats)から算出したConfidence（信頼度）を表示する。
 
-    Args:
-        confidence_result: confidence.build_confidence() の戻り値。
+    Confidenceの算出ロジックはすべてbacktest/confidence.pyに委譲しており、
+    このファイルはbuild_confidence()の戻り値をそのまま表示するだけ。
+    Scoreやrating.pyのGrade文字列は一切参照していない
+    （confidence.py側の「statsのみに依存する」という設計原則を、
+    UI側でも壊さないよう意図的にstatsのみを渡している）。
+
+    Confidenceの内訳（どの因子が強み/弱みか）は
+    backtest/confidence_explain.py（confidence.pyとは責務分離）
+    に委譲し、render_confidence_breakdown()で表示する。
 
     Returns:
-        {"confidence", "score", "stars", "reasons", "factor_breakdown",
-        "sample_count"} を持つdict。"stars" は score から算出した
-        0〜5の表示用★数（新しい分析値ではなく表示整形のみ）。
+        build_confidence()の戻り値。呼び出し側（render_rating_card）が
+        Decision Card・Evaluation Lab（分析・検証ハブ）へそのまま渡す
+        ために使う。
     """
-    score = confidence_result.get("score")
-    return {
-        "confidence": confidence_result.get("confidence"),
-        "score": score,
-        "stars": _score_to_stars(score),
-        "reasons": confidence_result.get("reasons", []),
-        "factor_breakdown": confidence_result.get("factor_breakdown", {}),
-        "sample_count": confidence_result.get("sample_count"),
-    }
+    st.markdown("##### 🛡️ Confidence（この評価の信頼度）")
+    st.caption("Scoreそのものではなく、このスコア帯の過去統計がどれだけ再現性を持つかを示します。")
+
+    confidence = build_confidence(stats)
+    stars = _confidence_stars(confidence["score"])
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Confidence", confidence["confidence"])
+    col2.metric("信頼度スコア", f"{confidence['score']} / 100")
+    col3.metric("★評価", stars)
+
+    if confidence["reasons"]:
+        st.markdown("**理由**")
+        for r in confidence["reasons"]:
+            st.caption(f"・{r}")
+
+    with st.expander("build_confidence() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(confidence)
+
+    render_confidence_breakdown(confidence)
+
+    return confidence
 
 
-def render_decision_view(decision_result: dict[str, Any]) -> dict[str, Any]:
-    """decision.build_decision() の戻り値を、表示用に抜粋・整形する。
+def render_confidence_breakdown(confidence: dict) -> None:
+    """
+    Confidenceの内訳（因子ごとのscore/weight/comment/classification）を
+    st.progress() の横棒で可視化する。
+
+    算出ロジックはすべて confidence_explain.build_confidence_explanation()
+    に委譲しており、このファイルは戻り値をそのまま表示するだけ。
+    """
+    st.markdown("###### 🔬 Confidenceの内訳（どこが強く、どこが弱いか）")
+
+    explanation = build_confidence_explanation(confidence)
+
+    classification_icon = {"strength": "🟢", "neutral": "🟡", "weakness": "🔴"}
+
+    for item in explanation["items"]:
+        icon = classification_icon.get(item["classification"], "⚪")
+        col_label, col_bar, col_score = st.columns([2, 4, 1])
+        with col_label:
+            st.markdown(f"{icon} **{item['name']}**")
+            st.caption(f"重み: {item['weight']:.0f}")
+        with col_bar:
+            st.progress(min(max(item["score"], 0), 100) / 100)
+            st.caption(item["comment"])
+        with col_score:
+            st.metric("", f"{item['score']:.0f}", label_visibility="collapsed")
+
+    with st.expander("build_confidence_explanation() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(explanation)
+
+
+def _confidence_stars(score: float) -> str:
+    """信頼度スコア(0〜100)を★の数(0〜5)に変換する表示専用ヘルパー。"""
+    filled = round(score / 20)
+    filled = max(0, min(5, filled))
+    return "★" * filled + "☆" * (5 - filled)
+
+
+# ────────────────────────────────────────────────
+# Decision Card（投資判断カード）
+# ────────────────────────────────────────────────
+def render_decision_card(rating: dict, stats: dict, confidence: dict) -> dict:
+    """
+    Decision Engine（backtest/decision.py・無変更）を呼び出し、
+    「結局、今は買いなのか？」が一目で分かる投資判断カードを表示する。
+
+    このUI関数は decision.build_decision() の戻り値を描画するだけの
+    薄い層であり、判断ロジック（Grade×Confidenceのマトリクス、
+    Risk判定、Summary文言の選定）は一切持たない。
+
+    将来「株ラボ」本番UIのメイン画面にそのまま流用することを想定し、
+    引数はrating/stats/confidenceの3つの辞書のみとしている
+    （debug_ui固有のsession_state等には依存しない）。
 
     Args:
-        decision_result: decision.build_decision() の戻り値。
+        rating    : rating.build_rating_from_score_result() の戻り値
+        stats     : statistics.build_score_range_stats() の戻り値
+        confidence: confidence.build_confidence() の戻り値
 
     Returns:
-        {"decision", "stars", "grade", "confidence", "risk", "summary",
-        "sample_count"} を持つdict。"stars" はDecisionラベルに対応する
-        表示用★数（_DECISION_STARSからのルックアップのみ。判断ロジック
-        ではない）。
+        decision.build_decision() の戻り値。呼び出し側
+        （render_rating_card）が Evaluation Lab（分析・検証ハブ）へ
+        そのまま渡すために使う。
     """
-    decision_label = decision_result.get("decision")
-    return {
-        "decision": decision_label,
-        "stars": _DECISION_STARS.get(decision_label),
-        "grade": decision_result.get("grade"),
-        "confidence": decision_result.get("confidence"),
-        "risk": decision_result.get("risk"),
-        "summary": decision_result.get("summary"),
-        "sample_count": decision_result.get("sample_count"),
-    }
+    st.markdown("##### 🧭 【投資判断】Decision Card")
+
+    decision_result = build_decision(rating, stats, confidence)
+
+    decision_label = decision_result["decision"]
+    stars_count = _DECISION_STARS.get(decision_label, 0)
+    stars_display = "★" * stars_count + "☆" * (5 - stars_count)
+
+    with st.container(border=True):
+        st.markdown(f"### {stars_display}　**{decision_label}**")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Grade", decision_result["grade"])
+        col2.metric("Confidence", decision_result["confidence"])
+        col3.metric("Risk", decision_result["risk"])
+
+        st.info(decision_result["summary"])
+
+    with st.expander("build_decision() 戻り値 全体（デバッグ用 raw dict）"):
+        st.json(decision_result)
+
+    return decision_result
 
 
-def render_decision_report_view(decision_report: dict[str, Any]) -> dict[str, Any]:
-    """decision_report.build_decision_report() の戻り値を、表示用に整理する。
-
-    生のdictをそのまま表示するのではなく、Decisionラベルごとの
-    件数・割合・勝率・平均リターン・最大DD・-10%以上下落率という
-    主要項目だけを抜粋する。avg_score/avg_confidence/avg_risk/
-    confidence_sample_size等の詳細項目は、必要な場合は
-    decision_report自体（引数）を別途参照する想定で、ここでは
-    「一覧性・要約性」を優先して主要項目のみに絞っている。
-
-    Args:
-        decision_report: decision_report.build_decision_report() の戻り値。
-
-    Returns:
-        {
-            "report_info": decision_reportの"report_info"をそのまま保持,
-            "decisions": {
-                Decisionラベル: {"count", "ratio_pct", "win_rate",
-                                  "avg_return", "max_dd", "down10_rate"},
-                ...
-            }
-        }
+# ────────────────────────────────────────────────
+# 閾値スライダー（動的レンジ）
+# ────────────────────────────────────────────────
+def _compute_threshold_range(res_df: pd.DataFrame, score_col: str = "total") -> tuple[int, int]:
     """
-    report_info = decision_report.get("report_info", {})
-    decisions: dict[str, Any] = {}
-
-    for label, entry in decision_report.items():
-        if label == "report_info" or not isinstance(entry, dict):
-            continue
-        decisions[label] = {
-            "count": entry.get("count"),
-            "ratio_pct": entry.get("ratio_pct"),
-            "win_rate": entry.get("win_rate"),
-            "avg_return": entry.get("avg_return"),
-            "max_dd": entry.get("max_dd"),
-            "down10_rate": entry.get("down10_rate"),
-        }
-
-    return {"report_info": report_info, "decisions": decisions}
-
-
-def render_benchmark_view(benchmark_result: dict[str, Any]) -> dict[str, Any]:
-    """benchmark.build_benchmark() の戻り値から、Improvement Score /
-    Overall / Summary だけを抜粋する薄い表示用関数。
-
-    metrics（項目別の改善/悪化内訳）は、詳細を見たい場合は
-    benchmark_result自体（引数）を別途参照する想定で、ここでは
-    「一目で分かる3項目」のみに絞っている。計算は一切行わない。
-
-    Args:
-        benchmark_result: benchmark.build_benchmark() の戻り値。
-
-    Returns:
-        {"improvement_score", "overall", "summary"} を持つdict。
+    res_dfの実際のスコア分布からスライダーの下限・上限を動的に算出する。
+    v8/v9等ロジックごとにスコアの取りうる範囲が異なるため、固定範囲だと
+    シグナル件数等の感度分析グラフが「常に全日シグナル対象」等でフラットに
+    見えてしまう場合がある。これを避けるため、実データのmin/maxから
+    毎回スライダー範囲を算出する（min-5〜max+5）。
     """
-    return {
-        "improvement_score": benchmark_result.get("improvement_score"),
-        "overall": benchmark_result.get("overall"),
-        "summary": benchmark_result.get("summary"),
-    }
+    if res_df.empty or score_col not in res_df.columns:
+        return THRESHOLD_MIN_FALLBACK, THRESHOLD_MAX_FALLBACK
+
+    valid = res_df[score_col].dropna()
+    if valid.empty:
+        return THRESHOLD_MIN_FALLBACK, THRESHOLD_MAX_FALLBACK
+
+    lo = int(math.floor(valid.min())) - 5
+    hi = int(math.ceil(valid.max())) + 5
+    return lo, hi
 
 
-def render_history_summary_view(
-    history_entries: list[dict[str, Any]],
-    benchmarks: Optional[dict[str, dict[str, Any]]] = None,
-) -> dict[str, Any]:
-    """report_history.build_history_entry() の戻り値一覧を、一覧表示用に整形する。
-
-    各履歴エントリについて Run ID・Timestamp・Strategy Version・
-    Config Hash・対象銘柄・対象期間を抜粋し、対応するBenchmark結果が
-    あれば Improvement Score も付与する。Benchmarkの算出自体は
-    行わない（benchmarks引数で既に計算済みの結果を受け取るのみ）。
-
-    Args:
-        history_entries: report_history.build_history_entry() の
-            戻り値のリスト。
-        benchmarks: {run_id: benchmark.build_benchmark()の戻り値} の
-            マッピング（任意）。対応するrun_idが無いエントリの
-            improvement_scoreはNoneになる。
-
-    Returns:
-        {"rows": [
-            {"run_id", "timestamp", "strategy_version", "config_hash",
-             "code", "period", "improvement_score"},
-            ...
-        ]}
+def render_threshold_slider(res_df: pd.DataFrame) -> int:
     """
-    benchmarks = benchmarks or {}
-    rows: list[dict[str, Any]] = []
+    判定閾値スライダーを表示し、選択された閾値を返す。
 
-    for entry in history_entries:
-        run_id = entry.get("run_id")
-        benchmark = benchmarks.get(run_id)
+    このスライダーの値が変わってもバックテストは再実行されない
+    （Streamlitの再描画のみが発生し、res_dfはキャッシュからそのまま読み直される）。
+    """
+    st.markdown("#### 🎚️ 判定閾値")
+    th_min, th_max = _compute_threshold_range(res_df)
+    threshold = st.slider(
+        "判定閾値",
+        min_value=th_min,
+        max_value=th_max,
+        value=th_min + (th_max - th_min) // 2,
+        step=THRESHOLD_STEP,
+        key="step1_threshold_slider",
+        label_visibility="collapsed",
+    )
+    return threshold
+
+
+def filter_results(res_df: pd.DataFrame, threshold: int,
+                    score_col: str = "total") -> pd.DataFrame:
+    """res_dfを閾値でフィルタするだけの関数（既存filter_by_thresholdの薄い呼び出し）。"""
+    return filter_by_threshold(res_df, threshold, score_col=score_col)
+
+
+# ────────────────────────────────────────────────
+# 評価指標パネル
+# ────────────────────────────────────────────────
+def render_metrics_overview(res_df: pd.DataFrame, filtered_df: pd.DataFrame,
+                             threshold: int, score_col: str = "total") -> None:
+    """
+    検証時に重要となる指標をまとめて表示する。
+
+    既存の describe_score_distribution / calc_max_drawdown /
+    calc_down10_rate（いずれもmetrics.py・無変更）をそのまま活用し、
+    このファイル側で新たな集計ロジックは持たない。
+    """
+    st.markdown(f"#### 📊 評価指標（閾値={threshold}点）")
+
+    dist = describe_score_distribution(res_df, score_col=score_col)
+    total_days = len(res_df)
+    signal_count = len(filtered_df)
+    signal_rate = (signal_count / total_days * 100) if total_days > 0 else None
+    max_dd = calc_max_drawdown(filtered_df)
+    down10 = calc_down10_rate(filtered_df)
+
+    row1 = st.columns(4)
+    row1[0].metric("判定対象営業日数", f"{total_days}日")
+    row1[1].metric("シグナル件数", signal_count)
+    row1[2].metric("シグナル率", _fmt(signal_rate, suffix="%"))
+    row1[3].metric("最大ドローダウン", _fmt(max_dd, suffix="%"))
+
+    row2 = st.columns(4)
+    row2[0].metric("-10%以上下落率", _fmt(down10, suffix="%"))
+    row2[1].metric("スコア平均", _fmt(dist["mean"]))
+    row2[2].metric("スコア中央値", _fmt(dist["median"]))
+    row2[3].metric("スコア最大 / 最小", f"{_fmt(dist['max'])} / {_fmt(dist['min'])}")
+
+    with st.expander("詳細統計量（四分位数）"):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("件数", dist["count"])
+        c2.metric("第1四分位(25%)", _fmt(dist["q25"]))
+        c3.metric("第3四分位(75%)", _fmt(dist["q75"]))
+
+
+# ────────────────────────────────────────────────
+# 感度分析グラフ（動的レンジ）
+# ────────────────────────────────────────────────
+def render_threshold_analysis(res_df: pd.DataFrame) -> None:
+    """
+    閾値を動的レンジでループさせた感度分析グラフを表示する。
+
+    build_threshold_analysis()（metrics.py・無変更）でres_dfに対する
+    集計のみを行い、バックテストの再実行は一切発生しない。
+    """
+    st.markdown("#### 📈 感度分析（閾値を変えた場合の傾向）")
+
+    th_min, th_max = _compute_threshold_range(res_df)
+    thresholds = range(th_min, th_max + 1)
+    analysis_df = build_threshold_analysis(res_df, thresholds)
+
+    chart_df = analysis_df.set_index("threshold")
+
+    st.caption("シグナル件数")
+    st.line_chart(chart_df[["signal_count"]])
+
+    st.caption("最大ドローダウン（%）")
+    st.line_chart(chart_df[["max_drawdown"]])
+
+    st.caption("-10%以上下落率（%）")
+    st.line_chart(chart_df[["down10_rate"]])
+
+    with st.expander("感度分析の集計表を見る"):
+        st.dataframe(analysis_df, use_container_width=True)
+
+
+# ────────────────────────────────────────────────
+# 日次結果テーブル
+# ────────────────────────────────────────────────
+def render_filtered_table(filtered_df: pd.DataFrame) -> None:
+    """閾値でフィルタ済みの日次バックテスト結果テーブルを表示する。"""
+    st.markdown("#### 📋 日次バックテスト結果（閾値を満たした日のみ）")
+
+    if filtered_df.empty:
+        st.info("この閾値を満たす日はありませんでした。")
+        return
+
+    display_df = filtered_df.copy()
+    display_df["down10_flag"] = display_df["max_drawdown_1m"] <= -10.0
+
+    show_cols = ["date", "total", "max_drawdown_1m", "down10_flag"]
+    show_cols = [c for c in show_cols if c in display_df.columns]
+
+    display_df = display_df[show_cols].rename(columns={
+        "date": "Date",
+        "total": "Score",
+        "max_drawdown_1m": "Max Drawdown",
+        "down10_flag": "Down10 Flag",
+    })
+
+    st.dataframe(display_df, use_container_width=True)
+
+
+# ════════════════════════════════════════════════
+# Evaluation Lab（評価実験基盤）※既存・無変更
+# ════════════════════════════════════════════════
+def render_evaluation_lab(res_df: pd.DataFrame, meta: dict) -> None:
+    """
+    Evaluation Lab（評価実験基盤）セクション全体を統括する。
+    分析ロジックはすべて backtest/evaluation.py に委譲し、
+    ここでは戻り値の表示のみを行う。
+    """
+    st.markdown("## 🧫 Evaluation Lab（評価実験基盤）")
+    st.caption("v9_config.py のパラメータ調整による影響を比較検証するための実験基盤です。")
+
+    render_evaluation_summary(meta)
+    st.divider()
+    render_score_distribution_lab(res_df)
+    st.divider()
+    render_confidence_distribution_lab(res_df)
+    st.divider()
+    render_threshold_impact_lab(res_df)
+    st.divider()
+    render_stock_comparison_lab(meta["period_code"], meta["period_label"], meta["strategy_key"])
+
+
+def render_evaluation_summary(meta: dict) -> None:
+    """現在の設定値（銘柄・期間・ロジック・v9_config.pyのスナップショット）を表示する。"""
+    st.markdown("#### 🔧 Evaluation Summary（現在の設定）")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("銘柄", f"{meta['code']} {meta['stock_name']}")
+    col2.metric("期間", meta["period_label"])
+    col3.metric("ロジック", meta["strategy_label"])
+
+    snapshot = evaluation.get_v9_config_snapshot()
+    enable = snapshot.get("ENABLE", {})
+    weight = snapshot.get("WEIGHT", {})
+
+    if enable:
+        st.markdown("**v9_config.py: コンポーネントON/OFF・重み**")
+        rows = [{"component": name, "enabled": enable.get(name), "weight": weight.get(name)}
+                for name in enable.keys()]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    with st.expander("v9_config.py 全定数（デバッグ用 raw dict）"):
+        st.json(snapshot)
+
+
+def render_score_distribution_lab(res_df: pd.DataFrame) -> None:
+    """Score分布（ヒストグラム・件数・中央値・平均・標準偏差）を表示する。"""
+    st.markdown("#### 📈 Score分布")
+
+    dist = evaluation.build_score_distribution_summary(res_df)
+    if dist["count"] == 0:
+        st.caption("データがありません。")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("件数", dist["count"])
+    c2.metric("平均", _fmt(dist["mean"]))
+    c3.metric("中央値", _fmt(dist["median"]))
+    c4.metric("標準偏差", _fmt(dist["std"]))
+
+    edges = dist["bin_edges"]
+    counts = dist["bin_counts"]
+    labels = [f"{edges[i]:.0f}〜{edges[i + 1]:.0f}" for i in range(len(counts))]
+    chart_df = pd.DataFrame({"score_bin": labels, "count": counts}).set_index("score_bin")
+    st.bar_chart(chart_df)
+
+
+def render_confidence_distribution_lab(res_df: pd.DataFrame) -> None:
+    """Confidence分布（High/Medium/Lowの割合）を表示する。"""
+    st.markdown("#### 🛡️ Confidence分布")
+
+    dist = evaluation.build_confidence_distribution(res_df)
+    if dist["total_days"] == 0:
+        st.caption("データがありません。")
+        return
+
+    days = dist["by_confidence_days"]
+    pct = dist["by_confidence_pct"]
+
+    cols = st.columns(3)
+    for col, label in zip(cols, ["High", "Medium", "Low"]):
+        col.metric(label, f"{days.get(label, 0)}日", _fmt(pct.get(label), suffix="%"))
+
+    st.markdown("**グレード別内訳**")
+    rows = []
+    for grade, info in dist["by_grade"].items():
         rows.append({
-            "run_id": run_id,
-            "timestamp": entry.get("timestamp"),
-            "strategy_version": entry.get("strategy_version"),
-            "config_hash": entry.get("config_hash"),
-            "code": entry.get("code"),
-            "period": entry.get("period"),
-            "improvement_score": benchmark.get("improvement_score") if benchmark else None,
+            "grade": grade,
+            "label": info["label"],
+            "days": info["days"],
+            "ratio_pct": _fmt(info["ratio_pct"], suffix="%"),
+            "confidence": info["confidence"],
+            "confidence_score": info["confidence_score"],
         })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    return {"rows": rows}
+
+def render_threshold_impact_lab(res_df: pd.DataFrame) -> None:
+    """閾値変更の影響比較を表示する。"""
+    st.markdown("#### 🎚️ 閾値変更の影響比較")
+    st.caption("例: Strong Buyの閾値を90→85に変えると対象件数・平均利益・DDがどう変わるかを比較できます。")
+
+    default_thresholds = sorted({
+        b.min_score for b in DEFAULT_RATING_CONFIG.grade_bands if b.min_score != float("-inf")
+    })
+    default_str = ", ".join(
+        str(int(t)) if float(t).is_integer() else str(t) for t in default_thresholds
+    )
+
+    raw_input = st.text_input(
+        "比較したい閾値（カンマ区切り）",
+        value=default_str,
+        key="eval_threshold_impact_input",
+    )
+    try:
+        thresholds = [float(x.strip()) for x in raw_input.split(",") if x.strip()]
+    except ValueError:
+        st.error("数値をカンマ区切りで入力してください（例: 85, 90）。")
+        return
+
+    if not thresholds:
+        st.info("比較したい閾値を入力してください。")
+        return
+
+    table = evaluation.build_threshold_impact_table(res_df, thresholds)
+    display = table.rename(columns={
+        "threshold": "閾値",
+        "count": "対象件数",
+        "ratio_pct": "割合(%)",
+        "win_rate": "勝率(%)",
+        "avg_return_1w": "平均1週間(%)",
+        "avg_return_1m": "平均1ヶ月(%)",
+        "avg_return_3m": "平均3ヶ月(%)",
+        "max_drawdown": "最大DD(%)",
+        "down10_rate": "-10%以上下落率(%)",
+    })
+    st.dataframe(display, use_container_width=True, hide_index=True)
 
 
-def render_evaluation_lab(
-    rating_result: dict[str, Any],
-    confidence_result: dict[str, Any],
-    decision_result: dict[str, Any],
-    decision_report: dict[str, Any],
-    benchmark_result: Optional[dict[str, Any]] = None,
-    history_entries: Optional[list[dict[str, Any]]] = None,
-    benchmarks: Optional[dict[str, dict[str, Any]]] = None,
-) -> dict[str, Any]:
-    """Evaluation Lab全体の表示用データを、①〜⑥の順で組み立てるオーケストレーター。
+def render_stock_comparison_lab(period_code: str, period_label: str, strategy_key: str) -> None:
+    """複数銘柄のStatistics/Confidenceを一覧比較する。"""
+    st.markdown("#### 🏢 銘柄比較（Statistics / Confidence）")
+    st.caption(f"期間: {period_label} / ロジック: {STRATEGY_REGISTRY[strategy_key]['label']}")
 
-    ①Rating → ②Confidence → ③Decision → ④Decision Report →
-    ⑤Benchmark → ⑥History Summary の順で、対応するrender_*関数を
-    呼び出すだけの薄い統括関数。内部で計算・Decision Engine・
-    Benchmark・Report・History Entryの生成は一切行わない
-    （それらの戻り値を引数として受け取るだけ）。
+    selected_codes = st.multiselect(
+        "比較する銘柄",
+        options=list(STOCK_CANDIDATES.keys()),
+        default=list(STOCK_CANDIDATES.keys()),
+        format_func=lambda c: f"{c} {STOCK_CANDIDATES[c]}",
+        key="eval_stock_compare_select",
+    )
 
-    Streamlit等のUIライブラリに依存しないため、debug_ui.py・本番画面・
-    レポート生成画面など複数のUI/出力先から同じ関数をそのまま
-    呼び出せる。
+    run_clicked = st.button("▶ 選択銘柄を一括実行して比較", key="eval_stock_compare_run")
+
+    if run_clicked:
+        for c in selected_codes:
+            cache = st.session_state.get(_SS_KEY_CACHE, {})
+            if (c, period_code, strategy_key) not in cache:
+                try:
+                    _execute_and_cache(c, period_label, period_code, strategy_key)
+                except Exception:
+                    st.error(f"❌ {c}のバックテスト実行中にエラーが発生しました。")
+                    st.code(traceback.format_exc(), language="text")
+
+    cache = st.session_state.get(_SS_KEY_CACHE, {})
+    stock_results = {}
+    missing = []
+    for c in selected_codes:
+        key = (c, period_code, strategy_key)
+        if key in cache:
+            res_df, _ = cache[key]
+            th_min, th_max = _compute_threshold_range(res_df)
+            threshold = th_min + (th_max - th_min) // 2
+            filtered_df = filter_results(res_df, threshold)
+            label = f"{c} {STOCK_CANDIDATES[c]}"
+            stock_results[label] = {
+                "res_df": res_df,
+                "filtered_df": filtered_df,
+                "threshold": threshold,
+                "label": label,
+            }
+        else:
+            missing.append(c)
+
+    if missing:
+        st.info(f"未実行の銘柄があります: {', '.join(missing)}。「▶ 選択銘柄を一括実行して比較」を押してください。")
+
+    if not stock_results:
+        return
+
+    st.caption("※ 各銘柄の閾値はスコア範囲の中央値を暫定的に使用しています。")
+
+    summary = evaluation.build_multi_stock_comparison(stock_results)
+    rows = []
+    for s in summary.values():
+        rt = s["return_tendency"]
+        signal_1m = rt.get("signal_days", {}).get("fwd_return_1m", {})
+        rows.append({
+            "銘柄": s["label"],
+            "判定対象日数": s["judged_days"],
+            "シグナル件数": s["signal_count"],
+            "シグナル率(%)": _fmt(s["signal_rate"]),
+            "最大DD(%)": _fmt(s["max_drawdown"]),
+            "-10%以上下落率(%)": _fmt(s["down10_rate"]),
+            "シグナル日 平均1ヶ月後リターン(%)": _fmt(signal_1m.get("mean")),
+            "Confidence": s["confidence"],
+            "Confidenceスコア": s["confidence_score"],
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ════════════════════════════════════════════════
+# Evaluation Lab（分析・検証ハブ）★今回追加
+# ════════════════════════════════════════════════
+def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
+                                   rating_bundle: dict | None) -> None:
+    """
+    evaluation.render_evaluation_lab()（Rating→Confidence→Decision→
+    Decision Report→Benchmark→History Summaryの表示用dictを組み立てる
+    オーケストレーター）を呼び出し、その戻り値をそのまま表示する。
+
+    Rating/Confidence/Decisionはrating_bundle（render_rating_card内で
+    既に計算済み）をそのまま渡し、再計算しない。Decision Reportのみ
+    decision_pipeline.attach_decision_columns() → decision_report.
+    build_decision_report() という既存モジュールの呼び出しで組み立てる。
+    Benchmark・Historyは今回のフェーズでは実データが無いため
+    render_evaluation_lab()にNoneを渡し、「未評価」のフォールバック
+    表示に委ねる。
+
+    st.expander で折りたたみ、通常のバックテスト閲覧を邪魔しないように
+    している。将来Streamlit以外の画面（本番画面・レポート生成画面等）へ
+    移植する場合も、evaluation.render_evaluation_lab() の戻り値dictを
+    そのまま別のUIへ渡すだけで再利用できる。
 
     Args:
-        rating_result: rating.build_rating() 系関数の戻り値。
-        confidence_result: confidence.build_confidence() の戻り値。
-        decision_result: decision.build_decision() の戻り値。
-        decision_report: decision_report.build_decision_report() の戻り値。
-        benchmark_result: benchmark.build_benchmark() の戻り値（任意）。
-            比較対象が無い場合はNoneを渡す（結果に"benchmark"キーは
-            含まれない）。
-        history_entries: report_history.build_history_entry() の
-            戻り値のリスト（任意）。省略時は結果に"history_summary"
-            キーは含まれない。
-        benchmarks: {run_id: benchmark結果} のマッピング（任意）。
-            render_history_summary_view()へそのまま渡される。
-
-    Returns:
-        {
-            "rating": render_rating_view()の戻り値,
-            "confidence": render_confidence_view()の戻り値,
-            "decision": render_decision_view()の戻り値,
-            "decision_report": render_decision_report_view()の戻り値,
-            "benchmark": render_benchmark_view()の戻り値,  # benchmark_result指定時のみ
-            "history_summary": render_history_summary_view()の戻り値,  # history_entries指定時のみ
-        }
+        res_df: 全営業日のバックテスト結果DataFrame。
+        meta: _execute_and_cache()が保存したメタ情報
+            （code/strategy_key/strategy_label等を含む）。
+        rating_bundle: render_rating_card()の戻り値
+            （{"rating","stats","confidence","decision"}）。
+            Noneの場合はデータ不足として全セクションを
+            フォールバック表示する。
     """
-    lab: dict[str, Any] = {
-        "rating": render_rating_view(rating_result),
-        "confidence": render_confidence_view(confidence_result),
-        "decision": render_decision_view(decision_result),
-        "decision_report": render_decision_report_view(decision_report),
+    with st.expander("🧪 Evaluation Lab（分析・検証ハブ）", expanded=False):
+        st.caption(
+            "Rating → Confidence → Decision → Decision Report → Benchmark → History"
+            " という分析パイプラインの結果をまとめて確認できます。"
+        )
+
+        if not rating_bundle:
+            st.info(
+                "評価データ（Rating/Confidence/Decision）がまだ算出されていません。"
+                " 上部の評価カードの表示を確認してください。"
+            )
+            return
+
+        rating = rating_bundle["rating"]
+        confidence = rating_bundle["confidence"]
+        decision = rating_bundle["decision"]
+
+        try:
+            pipeline_df = attach_decision_columns(res_df, meta["strategy_key"])
+            decision_report_result = build_decision_report(
+                pipeline_df, strategy_name=meta["strategy_label"], code=meta["code"]
+            )
+        except Exception:
+            st.warning("Decision Reportの生成中にエラーが発生したため、この区間は「データなし」として表示します。")
+            decision_report_result = {"report_info": {}}
+
+        lab = evaluation.render_evaluation_lab(
+            rating_result=rating,
+            confidence_result=confidence,
+            decision_result=decision,
+            decision_report=decision_report_result,
+            benchmark_result=None,
+            history_entries=None,
+        )
+
+        _render_eval_rating(lab.get("rating"))
+        st.divider()
+        _render_eval_confidence(lab.get("confidence"))
+        st.divider()
+        _render_eval_decision(lab.get("decision"))
+        st.divider()
+        _render_eval_decision_report(lab.get("decision_report"))
+        st.divider()
+        _render_eval_benchmark(lab.get("benchmark"))
+        st.divider()
+        _render_eval_history(lab.get("history_summary"))
+
+
+def _render_eval_rating(view: dict | None) -> None:
+    """① Rating Summary: evaluation.render_rating_view()の戻り値を表示する。"""
+    st.markdown("##### ① Rating Summary")
+    st.caption("Ratingは現在のスコアをGrade（等級）に変換した評価です。")
+
+    if not view:
+        st.info("Ratingデータがありません。")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Score", _fmt(view.get("score")))
+    c2.metric("Grade", view.get("grade") or "―")
+    c3.metric("Label", view.get("label") or "―")
+
+
+def _render_eval_confidence(view: dict | None) -> None:
+    """② Confidence Summary: evaluation.render_confidence_view()の戻り値を表示する。"""
+    st.markdown("##### ② Confidence Summary")
+    st.caption("Confidenceは、このスコア帯が過去どれだけ再現性を持っていたかを示す信頼度です。")
+
+    if not view:
+        st.info("Confidenceデータがありません。")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Confidence", view.get("confidence") or "―")
+    c2.metric("信頼度スコア", _fmt(view.get("score")))
+    stars = view.get("stars")
+    c3.metric("★評価", ("★" * stars + "☆" * (5 - stars)) if stars is not None else "―")
+
+    reasons = view.get("reasons") or []
+    if reasons:
+        st.markdown("**理由**")
+        for r in reasons:
+            st.caption(f"・{r}")
+
+
+def _render_eval_decision(view: dict | None) -> None:
+    """③ Decision Summary: evaluation.render_decision_view()の戻り値を表示する。"""
+    st.markdown("##### ③ Decision Summary")
+    st.caption("Decisionは、Rating（Grade）とConfidenceを組み合わせた最終的な投資判断です。")
+
+    if not view:
+        st.info("Decisionデータがありません。")
+        return
+
+    stars = view.get("stars") or 0
+    st.markdown(f"**{'★' * stars}{'☆' * (5 - stars)}　{view.get('decision') or '―'}**")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Grade", view.get("grade") or "―")
+    c2.metric("Confidence", view.get("confidence") or "―")
+    c3.metric("Risk", view.get("risk") or "―")
+
+    if view.get("summary"):
+        st.info(view["summary"])
+
+
+def _render_eval_decision_report(view: dict | None) -> None:
+    """④ Decision Report Summary: evaluation.render_decision_report_view()の戻り値を表示する。"""
+    st.markdown("##### ④ Decision Report Summary")
+    st.caption(
+        "Decision Reportは、過去の全営業日についてDecisionラベルごとの実績"
+        "（件数・勝率・平均リターン等）を集計したものです。"
+    )
+
+    decisions = (view or {}).get("decisions") or {}
+    if not decisions:
+        st.info("Decision Reportデータがありません。")
+        return
+
+    report_info = view.get("report_info", {}) if view else {}
+    if report_info:
+        st.caption(
+            f"対象: {report_info.get('code', '―')} / "
+            f"{report_info.get('period_start', '―')} 〜 {report_info.get('period_end', '―')} / "
+            f"総営業日数: {report_info.get('total_days', '―')}"
+        )
+
+    rows = []
+    for label, entry in decisions.items():
+        rows.append({
+            "Decision": label,
+            "件数": entry.get("count"),
+            "割合(%)": _fmt(entry.get("ratio_pct")),
+            "勝率(%)": _fmt(entry.get("win_rate")),
+            "平均リターン(%)": _fmt(entry.get("avg_return")),
+            "最大DD(%)": _fmt(entry.get("max_dd")),
+            "-10%以上下落率(%)": _fmt(entry.get("down10_rate")),
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _render_eval_benchmark(view: dict | None) -> None:
+    """⑤ Benchmark Summary: evaluation.render_benchmark_view()の戻り値を表示する（存在する場合のみ）。"""
+    st.markdown("##### ⑤ Benchmark Summary")
+    st.caption("Benchmarkは、2つの実験結果を比較し「改善したか・悪化したか」を判定したものです。")
+
+    if not view:
+        st.info("比較対象となる実験結果がまだ無いため、Benchmarkは未評価です。")
+        return
+
+    c1, c2 = st.columns(2)
+    c1.metric("Overall", view.get("overall") or "―")
+    c2.metric("Improvement Score", _fmt(view.get("improvement_score")))
+
+    if view.get("summary"):
+        st.caption(view["summary"])
+
+
+def _render_eval_history(view: dict | None) -> None:
+    """⑥ History Summary: evaluation.render_history_summary_view()の戻り値を表示する（存在する場合のみ）。"""
+    st.markdown("##### ⑥ History Summary")
+    st.caption("History Summaryは、これまでに実行した実験の履歴一覧です。")
+
+    rows = (view or {}).get("rows") or []
+    if not rows:
+        st.info("実行履歴がまだありません。")
+        return
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ────────────────────────────────────────────────
+# キャッシュ管理（研究基盤としての利便性のための小機能）
+# ────────────────────────────────────────────────
+def render_cache_controls() -> None:
+    """
+    このセッションで実行済みの (銘柄, 期間, ロジック) 組み合わせ一覧の表示と、
+    キャッシュクリアボタン。銘柄・期間・ロジックを切り替えながらの比較検証を
+    行う際、「今セッションで何を試したか」を見失わないための小さな補助機能。
+    """
+    cache = st.session_state.get(_SS_KEY_CACHE, {})
+    with st.expander(f"🗂️ このセッションで実行済みの組み合わせ（{len(cache)}件）"):
+        if not cache:
+            st.caption("まだ実行された組み合わせはありません。")
+        else:
+            for (code, period_code, strategy_key) in cache.keys():
+                label = STOCK_CANDIDATES.get(code, code)
+                strat_label = STRATEGY_REGISTRY.get(strategy_key, {}).get("label", strategy_key)
+                st.caption(f"・{code} {label} / {period_code} / {strat_label}")
+
+        if st.button("🗑 実行履歴をクリア", key="step1_clear_cache"):
+            st.session_state[_SS_KEY_CACHE] = {}
+            st.rerun()
+
+
+# ════════════════════════════════════════════════
+# 5. v8 / v9 比較セクション
+# ════════════════════════════════════════════════
+def render_comparison_section(code: str, period_code: str, period_label: str) -> None:
+    """
+    同一銘柄・同一期間でv8/v9を比較するセクション。
+    未実行の組み合わせは、このセクションのボタンから両方実行する
+    （既存のセッションキャッシュ・_execute_and_cache をそのまま再利用）。
+    """
+    st.markdown("### 🆚 v8 / v9 比較")
+    st.caption(f"対象: {code} {STOCK_CANDIDATES.get(code, '')} / {period_label}")
+
+    compare_clicked = st.button("▶ v8/v9比較を実行", key="step1_compare_run")
+
+    if compare_clicked:
+        cache = st.session_state.get(_SS_KEY_CACHE, {})
+        for strategy_key in ("v8", "v9"):
+            if (code, period_code, strategy_key) not in cache:
+                try:
+                    _execute_and_cache(code, period_label, period_code, strategy_key)
+                except Exception:
+                    st.error(f"❌ {strategy_key}のバックテスト実行中にエラーが発生しました。")
+                    st.code(traceback.format_exc(), language="text")
+                    return
+
+    cache = st.session_state.get(_SS_KEY_CACHE, {})
+    key_v8 = (code, period_code, "v8")
+    key_v9 = (code, period_code, "v9")
+
+    if key_v8 not in cache or key_v9 not in cache:
+        st.info("「▶ v8/v9比較を実行」ボタンを押すと、両方のロジックでバックテストを実行して比較します。")
+        return
+
+    res_df_v8, _ = cache[key_v8]
+    res_df_v9, _ = cache[key_v9]
+
+    th_v8_min, th_v8_max = _compute_threshold_range(res_df_v8)
+    th_v9_min, th_v9_max = _compute_threshold_range(res_df_v9)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        threshold_v8 = st.slider("v8判定閾値", th_v8_min, th_v8_max,
+                                  th_v8_min + (th_v8_max - th_v8_min) // 2,
+                                  key="compare_threshold_v8")
+    with c2:
+        threshold_v9 = st.slider("v9判定閾値", th_v9_min, th_v9_max,
+                                  th_v9_min + (th_v9_max - th_v9_min) // 2,
+                                  key="compare_threshold_v9")
+
+    filtered_v8 = filter_results(res_df_v8, threshold_v8)
+    filtered_v9 = filter_results(res_df_v9, threshold_v9)
+
+    st.markdown("#### 📈 スコア推移比較")
+    trend_df = comparison.align_score_series(res_df_v8, res_df_v9, "v8", "v9").set_index("date")
+    st.line_chart(trend_df[["v8", "v9"]])
+
+    st.markdown("#### 📊 比較サマリー")
+    results = {
+        "v8": {"res_df": res_df_v8, "filtered_df": filtered_v8, "threshold": threshold_v8,
+               "label": STRATEGY_REGISTRY["v8"]["label"]},
+        "v9": {"res_df": res_df_v9, "filtered_df": filtered_v9, "threshold": threshold_v9,
+               "label": STRATEGY_REGISTRY["v9"]["label"]},
     }
+    summary = comparison.build_comparison_summary(results)
+    render_comparison_table(summary)
 
-    if benchmark_result is not None:
-        lab["benchmark"] = render_benchmark_view(benchmark_result)
+    st.markdown("#### 🔍 v9 加減点要因の内訳（どのシグナルがスコアに効いたか）")
+    contrib_df = comparison.summarize_component_contributions(res_df_v9)
+    if contrib_df is not None and not contrib_df.empty:
+        st.dataframe(contrib_df, use_container_width=True)
+    else:
+        st.caption("内訳データがありません。")
 
-    if history_entries is not None:
-        lab["history_summary"] = render_history_summary_view(history_entries, benchmarks)
 
-    return lab
+def render_comparison_table(summary: dict) -> None:
+    """build_comparison_summary()の戻り値を見やすい比較表として描画する。"""
+    rows = []
+    for s in summary.values():
+        rt = s["return_tendency"]
+        signal_1m = rt.get("signal_days", {}).get("fwd_return_1m", {})
+        rows.append({
+            "ロジック": s["label"],
+            "判定対象日数": s["judged_days"],
+            "シグナル件数": s["signal_count"],
+            "シグナル率(%)": _fmt(s["signal_rate"]),
+            "高得点日割合(%)": _fmt(s["high_score_ratio"]),
+            "最大DD(%)": _fmt(s["max_drawdown"]),
+            "-10%以上下落率(%)": _fmt(s["down10_rate"]),
+            "シグナル日 平均1ヶ月後リターン(%)": _fmt(signal_1m.get("mean")),
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+
+# ────────────────────────────────────────────────
+# 内部ヘルパー
+# ────────────────────────────────────────────────
+def _fmt(value, suffix: str = "") -> str:
+    """
+    数値をNone/NaN安全に文字列化する（このUIファイル内でのみ使用）。
+
+    calc_max_drawdown() 等はシグナル0件時に None を返すが、
+    build_threshold_analysis() でDataFrame化する過程で
+    None が NaN（float）に変換されるケースがあるため、
+    NaN も明示的にハンドリングする。
+    """
+    if value is None:
+        return "―"
+    try:
+        f = float(value)
+        if f != f:  # NaNはそれ自身と等しくない（math.isnanと同義の軽量判定）
+            return "―"
+        return f"{f:.2f}{suffix}"
+    except (TypeError, ValueError):
+        return "―"
