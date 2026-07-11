@@ -4,25 +4,21 @@ backtest/debug_ui.py  (v9研究開発ブランチ Phase3 - 研究・検証基盤
 Step1バックテストの結果をブラウザ（Streamlit）から確認するための
 開発・検証専用UI層。
 
-【今回の追加（Decision Engineの投資判断カード表示）】
-  backtest/decision.py（Decision Engine・無変更）を呼び出し、
-  「結局、今は買いなのか？」が一目で分かる投資判断カードを追加した。
-  render_decision_card() は decision.build_decision() の戻り値を
-  そのまま描画するだけの薄いUI層であり、判断ロジックは一切持たない。
-  decision.py・rating.py・statistics.py・confidence.py・
-  confidence_explain.py・evaluation.py・comparison.py・
-  strategy_v8/v9・metrics.py・app.pyは一切変更していない。
-
-  表示位置は 評価カード → Confidence → Decision Card → Evaluation Lab
-  の順になるよう、render_rating_card() 内から
-  render_confidence_section() の直後に render_decision_card() を
-  呼び出す構成にしている（Evaluation Labは_render_results側で
-  引き続き別セクションとして最後に表示される）。
-
-  このDecision Cardは将来「株ラボ」本番UIのメイン画面にもそのまま
-  流用することを想定し、render_decision_card(rating, stats, confidence)
-  という「3つの分析結果dictを受け取って描画するだけ」の独立関数として
-  実装している（debug_ui固有の状態管理には依存しない）。
+【今回の追加（Evaluation Lab: History/Benchmarkの実データ供給）】
+  render_evaluation_hub_section() 内でDecision Report生成後に
+  report_history.build_history_entry()（無変更）を呼び、結果を
+  st.session_state["evaluation_history"]（最大20件、古いものから
+  自動削除）へ蓄積するようにした。同一(銘柄,期間,ロジック)の組み合わせ
+  では再描画のたびに重複登録しないよう、combo→run_idの索引を持たせて
+  いる。履歴が2件以上ある場合のみ、比較対象取得を独立関数
+  _select_benchmark_pair() で取得し、直近2件を benchmark.build_benchmark()
+  （無変更）に渡した結果を evaluation.render_evaluation_lab() へ供給する。
+  History Summaryには生の履歴全件ではなく、run_id/timestamp/strategy/
+  code/config_hash等の軽量情報のみを抽出したリストを渡す。
+  report_history.py・benchmark.py・evaluation.py・decision.py・
+  decision_pipeline.py・decision_report.py・decision_validation.py・
+  rating.py・confidence.py・confidence_explain.py・statistics.py・
+  metrics.py・comparison.py・strategy_v8/v9・app.pyは一切変更していない。
 
 【設計方針】
   backtest/ 配下の既存ロジックには一切変更を加えず、それらを
@@ -39,9 +35,19 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
     8. Confidence（render_confidence_section。confidence.pyの薄いラッパー）
     9. Confidenceの内訳可視化（render_confidence_breakdown。confidence_explain.pyの薄いラッパー）
     10. Decision Card（render_decision_card。decision.pyの薄いラッパー）
-    11. Evaluation Lab（render_evaluation_lab。evaluation.pyの薄いラッパー）
+    11. Evaluation Lab（評価実験基盤）（render_evaluation_lab。evaluation.pyの薄いラッパー）
+    12. Evaluation Lab（分析・検証ハブ）（render_evaluation_hub_section。
+        evaluation.render_evaluation_lab()の薄いラッパー。
+        History/Benchmarkの実データ供給を含む）★今回拡張
   将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
   追加するだけで比較対象に組み込める（他の層は変更不要）。
+
+  ※ 11.と12.は名称がどちらも「Evaluation Lab」だが別セクションである。
+    11.は v9_config.py のパラメータ調整の影響検証（設定値・Score分布・
+    Confidence分布・閾値影響・銘柄比較）を目的とした従来の実験基盤。
+    12.は Rating→Confidence→Decision→Decision Report→Benchmark→History
+    という分析パイプライン全体の結果を統合表示する新しいハブ。
+    両者は独立しており、互いのセクションを変更・削除していない。
 
 【重要：バックテストは「選択した条件ごとに」一度だけ実行】
   「▶ 実行」ボタンを押したときのみ、選択中の (銘柄, 期間, ロジック) の
@@ -51,6 +57,10 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
   銘柄・期間・ロジックを切り替えながらの比較検証時に、
   無駄なyfinance呼び出しやスコア再計算が発生しない。
   閾値スライダーの変更等でもバックテストは一切再実行しない。
+
+  Evaluation History（evaluation_history）も同様の考え方で、
+  同一(銘柄,期間,ロジック)の組み合わせにつき1件のみ記録する
+  （Streamlitの再描画のたびに重複登録しない）。
 
 【削除容易性について】
   このファイル1つに開発用UIロジックを集約している。
@@ -87,6 +97,10 @@ from backtest.statistics import build_score_range_stats
 from backtest.confidence import build_confidence
 from backtest.confidence_explain import build_confidence_explanation
 from backtest.decision import build_decision
+from backtest.decision_pipeline import attach_decision_columns
+from backtest.decision_report import build_decision_report
+from backtest.report_history import build_history_entry
+from backtest.benchmark import build_benchmark
 from backtest import evaluation
 
 
@@ -142,6 +156,14 @@ THRESHOLD_STEP = 1
 # 発生しないようにするための、条件ごとのキャッシュ。
 _SS_KEY_CACHE = "step1_results_cache"
 
+# ── Evaluation History（Decision Reportの履歴）のセッションキー ──
+# 値は list[dict]（report_history.build_history_entry()の戻り値の配列）。
+_SS_KEY_HISTORY = "evaluation_history"
+# 値は {(code, period_code, strategy_key): run_id}。
+# 同一組み合わせでの重複登録を防ぐための索引。
+_SS_KEY_HISTORY_INDEX = "evaluation_history_index"
+_HISTORY_MAX_ENTRIES = 20
+
 # ── Decision表示用の★マッピング（表示専用。判断ロジックではない） ──
 # decision.build_decision() が返す "decision" 文字列を★の数に変換するだけの
 # 表示ヘルパー。判断そのものはdecision.py側のマトリクスが決めており、
@@ -151,6 +173,15 @@ _DECISION_STARS: dict[str, int] = {
     "Buy": 4,
     "Watch": 2,
     "Avoid": 1,
+}
+
+# ── Benchmark overall → 表示用アイコン（表示専用。判定ロジックではない） ──
+# benchmark.build_benchmark() が返す "overall" 文字列をアイコンへ
+# マッピングするだけの表示ヘルパー。
+_IMPROVEMENT_STATUS_ICON: dict[str, str] = {
+    "Improved": "📈",
+    "Neutral": "➖",
+    "Declined": "📉",
 }
 
 
@@ -314,15 +345,11 @@ def _render_results(res_df: pd.DataFrame, meta: dict) -> None:
     UI部品は render_* 関数へ分離しており、それぞれ
     「DataFrameを受け取って表示するだけ」の責務に限定している。
     strategy固有の条件分岐は持たない。
-
-    表示順: 実行条件 → 評価カード(Grade/Confidence/Decision Card含む)
-            → 閾値スライダー → 評価指標 → 感度分析 → 日次結果
-            → Evaluation Lab → キャッシュ管理
     """
     render_summary_meta(meta)
 
     st.divider()
-    render_rating_card(res_df)
+    rating_bundle = render_rating_card(res_df)
 
     st.divider()
     threshold = render_threshold_slider(res_df)
@@ -339,6 +366,9 @@ def _render_results(res_df: pd.DataFrame, meta: dict) -> None:
 
     st.divider()
     render_evaluation_lab(res_df, meta)
+
+    st.divider()
+    render_evaluation_hub_section(res_df, meta, rating_bundle)
 
     st.divider()
     render_cache_controls()
@@ -370,15 +400,24 @@ def render_summary_meta(meta: dict) -> None:
 # ────────────────────────────────────────────────
 # 評価変換層（rating.py）の動作確認カード
 # ────────────────────────────────────────────────
-def render_rating_card(res_df: pd.DataFrame) -> None:
+def render_rating_card(res_df: pd.DataFrame) -> dict | None:
     """
     現在表示中のバックテスト結果のうち、最新営業日（判定対象期間の最終日＝
     「今日時点」に相当する行）のスコアを rating.build_rating_from_score_result()
     に通し、評価変換層が期待通りの判定を返しているかを目視確認するための
     カードを表示する。
 
-    表示順（PM指定）: 評価カード(Grade/Label/Score) → 過去実績統計
-    → Confidence → Decision Card → Components内訳
+    Grade/Label/Score・componentsの生データに加え、そのグレードの
+    スコア範囲についての過去実績統計（render_rating_history_stats）と、
+    その統計から算出したConfidence（render_confidence_section）、
+    Decision（render_decision_card）を直下に表示する。
+
+    Returns:
+        {"rating": rating辞書, "stats": stats辞書, "confidence": confidence辞書,
+         "decision": decision辞書} の形の束。res_dfが空、またはstats/confidence/
+        decisionのいずれかが算出できなかった場合はNoneを返す
+        （呼び出し側でEvaluation Lab（分析・検証ハブ）へ渡すかどうかの
+        判断に使う。既存の計算結果を再利用するだけで、再計算はしない）。
     """
     st.markdown("#### 🧾 評価変換層 動作確認（rating.py）")
     st.caption(
@@ -388,7 +427,7 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
 
     if res_df.empty:
         st.info("バックテスト結果が空のため、評価変換を実行できません。")
-        return
+        return None
 
     latest_row = res_df.iloc[-1].to_dict()
     rating = build_rating_from_score_result(latest_row)
@@ -406,13 +445,14 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
     stats = render_rating_history_stats(res_df, rating["grade"])
 
     confidence = None
+    decision = None
     if stats is not None:
         st.divider()
         confidence = render_confidence_section(stats)
 
     if stats is not None and confidence is not None:
         st.divider()
-        render_decision_card(rating, stats, confidence)
+        decision = render_decision_card(rating, stats, confidence)
 
     st.divider()
 
@@ -440,6 +480,10 @@ def render_rating_card(res_df: pd.DataFrame) -> None:
 
     with st.expander("build_rating() 戻り値 全体（デバッグ用 raw dict）"):
         st.json(rating)
+
+    if stats is None or confidence is None or decision is None:
+        return None
+    return {"rating": rating, "stats": stats, "confidence": confidence, "decision": decision}
 
 
 # ────────────────────────────────────────────────
@@ -509,7 +553,8 @@ def render_confidence_section(stats: dict) -> dict:
 
     Returns:
         build_confidence()の戻り値。呼び出し側（render_rating_card）が
-        Decision Card（render_decision_card）へそのまま渡すために使う。
+        Decision Card・Evaluation Lab（分析・検証ハブ）へそのまま渡す
+        ために使う。
     """
     st.markdown("##### 🛡️ Confidence（この評価の信頼度）")
     st.caption("Scoreそのものではなく、このスコア帯の過去統計がどれだけ再現性を持つかを示します。")
@@ -573,9 +618,9 @@ def _confidence_stars(score: float) -> str:
 
 
 # ────────────────────────────────────────────────
-# Decision Card（投資判断カード）★今回追加
+# Decision Card（投資判断カード）
 # ────────────────────────────────────────────────
-def render_decision_card(rating: dict, stats: dict, confidence: dict) -> None:
+def render_decision_card(rating: dict, stats: dict, confidence: dict) -> dict:
     """
     Decision Engine（backtest/decision.py・無変更）を呼び出し、
     「結局、今は買いなのか？」が一目で分かる投資判断カードを表示する。
@@ -588,15 +633,15 @@ def render_decision_card(rating: dict, stats: dict, confidence: dict) -> None:
     引数はrating/stats/confidenceの3つの辞書のみとしている
     （debug_ui固有のsession_state等には依存しない）。
 
-    将来、配当評価・優待評価・ファンダメンタル評価・AIコメント等を
-    追加する場合は、build_decision()呼び出しにextra_signals引数を
-    渡した上で、このカード内に表示行を数項目追加するだけで対応できる
-    （decision.py・本関数のコア構造自体の変更は不要な想定）。
-
     Args:
         rating    : rating.build_rating_from_score_result() の戻り値
         stats     : statistics.build_score_range_stats() の戻り値
         confidence: confidence.build_confidence() の戻り値
+
+    Returns:
+        decision.build_decision() の戻り値。呼び出し側
+        （render_rating_card）が Evaluation Lab（分析・検証ハブ）へ
+        そのまま渡すために使う。
     """
     st.markdown("##### 🧭 【投資判断】Decision Card")
 
@@ -616,15 +661,10 @@ def render_decision_card(rating: dict, stats: dict, confidence: dict) -> None:
 
         st.info(decision_result["summary"])
 
-        # ── 将来の拡張ポイント ──────────────────────
-        # 配当評価・優待評価・ファンダメンタル評価・AIコメント等を
-        # 追加する場合、ここに st.metric / st.caption 等を数行追加するだけでよい。
-        # 例:
-        #   if decision_result.get("dividend_grade"):
-        #       st.metric("配当評価", decision_result["dividend_grade"])
-
     with st.expander("build_decision() 戻り値 全体（デバッグ用 raw dict）"):
         st.json(decision_result)
+
+    return decision_result
 
 
 # ────────────────────────────────────────────────
@@ -776,7 +816,7 @@ def render_filtered_table(filtered_df: pd.DataFrame) -> None:
 
 
 # ════════════════════════════════════════════════
-# Evaluation Lab
+# Evaluation Lab（評価実験基盤）※既存・無変更
 # ════════════════════════════════════════════════
 def render_evaluation_lab(res_df: pd.DataFrame, meta: dict) -> None:
     """
@@ -984,6 +1024,370 @@ def render_stock_comparison_lab(period_code: str, period_label: str, strategy_ke
             "Confidence": s["confidence"],
             "Confidenceスコア": s["confidence_score"],
         })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ════════════════════════════════════════════════
+# Evaluation Lab（分析・検証ハブ）
+# ════════════════════════════════════════════════
+def _get_or_create_history_entry(res_df: pd.DataFrame, meta: dict,
+                                  decision_report_result: dict) -> dict:
+    """
+    現在の (銘柄, 期間, ロジック) の組み合わせについて、Evaluation History
+    エントリを取得または新規作成する。
+
+    同一の組み合わせが既に記録済みの場合は既存エントリを再利用し、
+    Streamlitの再描画（閾値スライダー操作等）のたびに重複登録しない。
+    report_history.build_history_entry()（無変更）を呼び出すのみで、
+    新しい計算は行わない。config_snapshotは既存の
+    evaluation.get_v9_config_snapshot()（無変更）から取得する。
+
+    Args:
+        res_df: 全営業日のバックテスト結果DataFrame（現状は未使用だが、
+            将来period情報等の直接抽出に使えるよう引数として保持）。
+        meta: _execute_and_cache()が保存したメタ情報。
+        decision_report_result: decision_report.build_decision_report()
+            の戻り値。
+
+    Returns:
+        report_history.build_history_entry() の戻り値
+        （新規作成時、または既存の履歴から取得した同一エントリ）。
+    """
+    combo_key = (meta["code"], meta["period_code"], meta["strategy_key"])
+
+    history: list[dict] = st.session_state.setdefault(_SS_KEY_HISTORY, [])
+    index: dict = st.session_state.setdefault(_SS_KEY_HISTORY_INDEX, {})
+
+    existing_run_id = index.get(combo_key)
+    if existing_run_id is not None:
+        existing = next((e for e in history if e.get("run_id") == existing_run_id), None)
+        if existing is not None:
+            return existing
+
+    config_snapshot = evaluation.get_v9_config_snapshot()
+    entry = build_history_entry(
+        report=decision_report_result,
+        config_snapshot=config_snapshot,
+        strategy=meta["strategy_key"],
+        code=meta["code"],
+        period=meta["period_label"],
+        strategy_version=meta["strategy_key"],
+        created_by="debug_ui",
+    )
+
+    history.append(entry)
+    index[combo_key] = entry["run_id"]
+
+    # 最大保持件数を超えた分は古いものから削除する。
+    # indexも合わせて整合を取る（削除されたrun_idを指すエントリを除去）。
+    if len(history) > _HISTORY_MAX_ENTRIES:
+        removed = history[: len(history) - _HISTORY_MAX_ENTRIES]
+        removed_run_ids = {e.get("run_id") for e in removed}
+        st.session_state[_SS_KEY_HISTORY] = history[len(history) - _HISTORY_MAX_ENTRIES:]
+        st.session_state[_SS_KEY_HISTORY_INDEX] = {
+            k: v for k, v in index.items() if v not in removed_run_ids
+        }
+
+    return entry
+
+
+def _select_benchmark_pair(history: list[dict], index_a: int = -2,
+                            index_b: int = -1) -> tuple[dict, dict] | None:
+    """
+    履歴リストから比較対象となる2件を取得する独立関数。
+
+    現状は「直近2件」（index_a=-2, index_b=-1）を既定とするが、
+    将来「任意の2件を選んで比較するUI」を追加する場合も、
+    呼び出し側が index_a/index_b（または将来的にはrun_id指定へ拡張）を
+    変えるだけで対応でき、本関数・呼び出し元の比較ロジック自体は
+    変更不要な設計にしている。
+
+    Args:
+        history: st.session_state[_SS_KEY_HISTORY] のリスト
+            （report_history.build_history_entry()の戻り値の配列）。
+        index_a: 比較元（before）のインデックス。
+        index_b: 比較先（after）のインデックス。
+
+    Returns:
+        (entry_a, entry_b) のタプル。historyが2件未満、または
+        指定インデックスが範囲外の場合はNone。
+    """
+    if len(history) < 2:
+        return None
+    try:
+        return history[index_a], history[index_b]
+    except IndexError:
+        return None
+
+
+def _build_lightweight_history_rows(history: list[dict]) -> list[dict]:
+    """
+    セッション内履歴（report/config_snapshot等の重い情報を含む）から、
+    Evaluation Lab（History Summary）に必要な軽量情報のみを抽出する。
+
+    evaluation.render_history_summary_view() が参照するキー
+    （run_id/timestamp/strategy_version/config_hash/code/period）と
+    同じ項目のみを保持し、report本体・config_snapshot本体は含めない。
+
+    Args:
+        history: st.session_state[_SS_KEY_HISTORY] のリスト。
+
+    Returns:
+        各要素が {"run_id", "timestamp", "strategy_version",
+        "config_hash", "code", "period"} を持つ、軽量化されたdictのリスト。
+    """
+    return [
+        {
+            "run_id": entry.get("run_id"),
+            "timestamp": entry.get("timestamp"),
+            "strategy_version": entry.get("strategy_version"),
+            "config_hash": entry.get("config_hash"),
+            "code": entry.get("code"),
+            "period": entry.get("period"),
+        }
+        for entry in history
+    ]
+
+
+def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
+                                   rating_bundle: dict | None) -> None:
+    """
+    evaluation.render_evaluation_lab()（Rating→Confidence→Decision→
+    Decision Report→Benchmark→History Summaryの表示用dictを組み立てる
+    オーケストレーター）を呼び出し、その戻り値をそのまま表示する。
+
+    Rating/Confidence/Decisionはrating_bundle（render_rating_card内で
+    既に計算済み）をそのまま渡し、再計算しない。Decision Reportは
+    decision_pipeline.attach_decision_columns() → decision_report.
+    build_decision_report() という既存モジュールの呼び出しで組み立てる。
+
+    Decision Report生成後、report_history.build_history_entry()で履歴
+    エントリを作成・セッションへ蓄積する（_get_or_create_history_entry。
+    同一組み合わせの重複登録は行わない）。履歴が2件以上ある場合のみ、
+    直近2件（_select_benchmark_pair）をbenchmark.build_benchmark()に
+    渡して比較する。History Summaryには軽量化した履歴一覧
+    （_build_lightweight_history_rows）のみを渡す。
+
+    st.expander で折りたたみ、通常のバックテスト閲覧を邪魔しないように
+    している。将来Streamlit以外の画面（本番画面・レポート生成画面等）へ
+    移植する場合も、evaluation.render_evaluation_lab() の戻り値dictを
+    そのまま別のUIへ渡すだけで再利用できる。
+
+    Args:
+        res_df: 全営業日のバックテスト結果DataFrame。
+        meta: _execute_and_cache()が保存したメタ情報
+            （code/strategy_key/strategy_label等を含む）。
+        rating_bundle: render_rating_card()の戻り値
+            （{"rating","stats","confidence","decision"}）。
+            Noneの場合はデータ不足として全セクションを
+            フォールバック表示する。
+    """
+    with st.expander("🧪 Evaluation Lab（分析・検証ハブ）", expanded=False):
+        st.caption(
+            "Rating → Confidence → Decision → Decision Report → Benchmark → History"
+            " という分析パイプラインの結果をまとめて確認できます。"
+        )
+
+        if not rating_bundle:
+            st.info(
+                "評価データ（Rating/Confidence/Decision）がまだ算出されていません。"
+                " 上部の評価カードの表示を確認してください。"
+            )
+            return
+
+        rating = rating_bundle["rating"]
+        confidence = rating_bundle["confidence"]
+        decision = rating_bundle["decision"]
+
+        try:
+            pipeline_df = attach_decision_columns(res_df, meta["strategy_key"])
+            decision_report_result = build_decision_report(
+                pipeline_df, strategy_name=meta["strategy_label"], code=meta["code"]
+            )
+        except Exception:
+            st.warning("Decision Reportの生成中にエラーが発生したため、この区間は「データなし」として表示します。")
+            decision_report_result = {"report_info": {}}
+
+        benchmark_result = None
+        benchmark_note = None
+        history_rows: list[dict] = []
+        benchmarks_by_run_id: dict[str, dict] = {}
+
+        try:
+            history_entry = _get_or_create_history_entry(res_df, meta, decision_report_result)
+            history: list[dict] = st.session_state.get(_SS_KEY_HISTORY, [])
+
+            pair = _select_benchmark_pair(history)
+            if pair is not None:
+                entry_before, entry_after = pair
+                benchmark_result = build_benchmark(entry_before, entry_after)
+                benchmarks_by_run_id[entry_after.get("run_id")] = benchmark_result
+            else:
+                benchmark_note = "比較には2件以上の履歴が必要です。"
+
+            history_rows = _build_lightweight_history_rows(history)
+        except Exception:
+            st.warning("History/Benchmarkの生成中にエラーが発生したため、この区間は「データなし」として表示します。")
+            history_rows = []
+
+        lab = evaluation.render_evaluation_lab(
+            rating_result=rating,
+            confidence_result=confidence,
+            decision_result=decision,
+            decision_report=decision_report_result,
+            benchmark_result=benchmark_result,
+            history_entries=history_rows if history_rows else None,
+            benchmarks=benchmarks_by_run_id if benchmarks_by_run_id else None,
+        )
+
+        _render_eval_rating(lab.get("rating"))
+        st.divider()
+        _render_eval_confidence(lab.get("confidence"))
+        st.divider()
+        _render_eval_decision(lab.get("decision"))
+        st.divider()
+        _render_eval_decision_report(lab.get("decision_report"))
+        st.divider()
+        _render_eval_benchmark(lab.get("benchmark"), note=benchmark_note)
+        st.divider()
+        _render_eval_history(lab.get("history_summary"))
+
+
+def _render_eval_rating(view: dict | None) -> None:
+    """① Rating Summary: evaluation.render_rating_view()の戻り値を表示する。"""
+    st.markdown("##### ① Rating Summary")
+    st.caption("Ratingは現在のスコアをGrade（等級）に変換した評価です。")
+
+    if not view:
+        st.info("Ratingデータがありません。")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Score", _fmt(view.get("score")))
+    c2.metric("Grade", view.get("grade") or "―")
+    c3.metric("Label", view.get("label") or "―")
+
+
+def _render_eval_confidence(view: dict | None) -> None:
+    """② Confidence Summary: evaluation.render_confidence_view()の戻り値を表示する。"""
+    st.markdown("##### ② Confidence Summary")
+    st.caption("Confidenceは、このスコア帯が過去どれだけ再現性を持っていたかを示す信頼度です。")
+
+    if not view:
+        st.info("Confidenceデータがありません。")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Confidence", view.get("confidence") or "―")
+    c2.metric("信頼度スコア", _fmt(view.get("score")))
+    stars = view.get("stars")
+    c3.metric("★評価", ("★" * stars + "☆" * (5 - stars)) if stars is not None else "―")
+
+    reasons = view.get("reasons") or []
+    if reasons:
+        st.markdown("**理由**")
+        for r in reasons:
+            st.caption(f"・{r}")
+
+
+def _render_eval_decision(view: dict | None) -> None:
+    """③ Decision Summary: evaluation.render_decision_view()の戻り値を表示する。"""
+    st.markdown("##### ③ Decision Summary")
+    st.caption("Decisionは、Rating（Grade）とConfidenceを組み合わせた最終的な投資判断です。")
+
+    if not view:
+        st.info("Decisionデータがありません。")
+        return
+
+    stars = view.get("stars") or 0
+    st.markdown(f"**{'★' * stars}{'☆' * (5 - stars)}　{view.get('decision') or '―'}**")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Grade", view.get("grade") or "―")
+    c2.metric("Confidence", view.get("confidence") or "―")
+    c3.metric("Risk", view.get("risk") or "―")
+
+    if view.get("summary"):
+        st.info(view["summary"])
+
+
+def _render_eval_decision_report(view: dict | None) -> None:
+    """④ Decision Report Summary: evaluation.render_decision_report_view()の戻り値を表示する。"""
+    st.markdown("##### ④ Decision Report Summary")
+    st.caption(
+        "Decision Reportは、過去の全営業日についてDecisionラベルごとの実績"
+        "（件数・勝率・平均リターン等）を集計したものです。"
+    )
+
+    decisions = (view or {}).get("decisions") or {}
+    if not decisions:
+        st.info("Decision Reportデータがありません。")
+        return
+
+    report_info = view.get("report_info", {}) if view else {}
+    if report_info:
+        st.caption(
+            f"対象: {report_info.get('code', '―')} / "
+            f"{report_info.get('period_start', '―')} 〜 {report_info.get('period_end', '―')} / "
+            f"総営業日数: {report_info.get('total_days', '―')}"
+        )
+
+    rows = []
+    for label, entry in decisions.items():
+        rows.append({
+            "Decision": label,
+            "件数": entry.get("count"),
+            "割合(%)": _fmt(entry.get("ratio_pct")),
+            "勝率(%)": _fmt(entry.get("win_rate")),
+            "平均リターン(%)": _fmt(entry.get("avg_return")),
+            "最大DD(%)": _fmt(entry.get("max_dd")),
+            "-10%以上下落率(%)": _fmt(entry.get("down10_rate")),
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _render_eval_benchmark(view: dict | None, note: str | None = None) -> None:
+    """
+    ⑤ Benchmark Summary: evaluation.render_benchmark_view()の戻り値を表示する。
+
+    改善/悪化/変化なしをアイコンで一目で分かるように表示する
+    （_IMPROVEMENT_STATUS_ICONによる表示用マッピングのみで、
+    判定ロジックはbenchmark.py側が既に確定させたoverallをそのまま使う）。
+
+    Args:
+        view: evaluation.render_benchmark_view()の戻り値。比較対象が
+            無い場合はNone。
+        note: 比較対象が無い理由の案内文（例: "比較には2件以上の履歴が
+            必要です。"）。viewがNoneの場合のみ表示する。
+    """
+    st.markdown("##### ⑤ Benchmark Summary")
+    st.caption("Benchmarkは、2つの実験結果を比較し「改善したか・悪化したか」を判定したものです。")
+
+    if not view:
+        st.info(note or "比較対象となる実験結果がまだ無いため、Benchmarkは未評価です。")
+        return
+
+    overall = view.get("overall")
+    icon = _IMPROVEMENT_STATUS_ICON.get(overall, "❔")
+
+    c1, c2 = st.columns(2)
+    c1.metric("Overall", f"{icon} {overall or '―'}")
+    c2.metric("Improvement Score", _fmt(view.get("improvement_score")))
+
+    if view.get("summary"):
+        st.caption(view["summary"])
+
+
+def _render_eval_history(view: dict | None) -> None:
+    """⑥ History Summary: evaluation.render_history_summary_view()の戻り値を表示する。"""
+    st.markdown("##### ⑥ History Summary")
+    st.caption("History Summaryは、これまでに実行した実験の履歴一覧です（このセッション内、最大20件）。")
+
+    rows = (view or {}).get("rows") or []
+    if not rows:
+        st.info("実行履歴がまだありません。")
+        return
+
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
