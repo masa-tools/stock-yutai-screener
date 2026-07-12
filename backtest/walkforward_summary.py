@@ -574,3 +574,243 @@ def build_health_check(
 
     各入力がNone（データ不足）の場合は、その指標の重みを0として除外し、
     残りの指標のみで按分して判定する（confidence.pyが個々の因子欠損時に
+    採用しているのと同じ「欠損factorは加重から除外する」という設計を
+    踏襲）。すべての入力がNoneの場合は判定不能として"Unknown"を返す。
+
+    Args:
+        validation_success_rate_pct: 成功Window数/総Window数×100。
+        stability_score: build_stability_score()が返すscore（0〜100）。
+        benchmark_improvement_rate_pct: build_benchmark_improvement_rate()
+            が返すrate_pct（0〜100）。データが無ければNone。
+        config: 重み・閾値のまとまり。
+
+    Returns:
+        {"level": "Excellent"|"Good"|"Fair"|"Poor"|"Unknown",
+         "score": float | None, "reason": str}
+    """
+    components = [
+        (validation_success_rate_pct, config.weight_validation_success_rate, "Validation成功率"),
+        (stability_score, config.weight_stability_score, "Stability Score"),
+        (benchmark_improvement_rate_pct, config.weight_benchmark_improvement_rate, "Benchmark改善率"),
+    ]
+
+    weighted_sum = 0.0
+    weight_total = 0.0
+    used_labels = []
+    for value, weight, label in components:
+        if value is None:
+            continue
+        weighted_sum += value * weight
+        weight_total += weight
+        used_labels.append(label)
+
+    if weight_total <= 0:
+        return {
+            "level": "Unknown",
+            "score": None,
+            "reason": "品質判定に利用できる指標がありませんでした。",
+        }
+
+    score = round(weighted_sum / weight_total, 1)
+
+    if score >= config.excellent_threshold:
+        level = "Excellent"
+    elif score >= config.good_threshold:
+        level = "Good"
+    elif score >= config.fair_threshold:
+        level = "Fair"
+    else:
+        level = "Poor"
+
+    return {
+        "level": level,
+        "score": score,
+        "reason": f"{'・'.join(used_labels)} を基に算出した総合スコアは{score}点です。",
+    }
+
+
+# ════════════════════════════════════════════════
+# Best Window / Worst Window
+# ════════════════════════════════════════════════
+def build_best_worst_window(
+    window_metrics: list[dict[str, Any]],
+    config: RankingConfig = DEFAULT_RANKING_CONFIG,
+) -> dict[str, Optional[dict[str, Any]]]:
+    """指定した指標（デフォルト: avg_return）で、成功Windowの中から
+    最良・最悪のWindowを選ぶ。
+
+    Args:
+        window_metrics: build_window_metrics_table() の戻り値。
+        config: 順位付けに使う指標と方向性。
+
+    Returns:
+        {"best": {...} | None, "worst": {...} | None}。
+        各要素は {"run_id", "validation_period_id", "strategy_name",
+        "code", "window_index", "metric", "value"} を持つdict。
+        指標値を持つ成功Windowが1件も無い場合は両方None。
+    """
+    candidates = [
+        w for w in window_metrics
+        if w.get("success") and w.get(config.metric) is not None
+    ]
+    if not candidates:
+        return {"best": None, "worst": None}
+
+    ordered = sorted(candidates, key=lambda w: w[config.metric], reverse=config.higher_is_better)
+    best_raw = ordered[0]
+    worst_raw = ordered[-1]
+
+    def _to_entry(w: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "run_id": w.get("run_id"),
+            "validation_period_id": w.get("validation_period_id"),
+            "strategy_name": w.get("strategy_name"),
+            "code": w.get("code"),
+            "window_index": w.get("window_index"),
+            "metric": config.metric,
+            "value": w.get(config.metric),
+        }
+
+    return {"best": _to_entry(best_raw), "worst": _to_entry(worst_raw)}
+
+
+# ════════════════════════════════════════════════
+# Summary Metadata
+# ════════════════════════════════════════════════
+def build_summary_metadata(
+    pipeline_result: dict[str, Any],
+    window_count: int,
+    successful_windows: int,
+    failed_windows: int,
+) -> dict[str, Any]:
+    """パイプライン結果から、Summary全体のメタ情報を組み立てる。
+
+    Args:
+        pipeline_result: run_walkforward_pipeline() の戻り値。
+        window_count: 総Window数。
+        successful_windows: 成功Window数。
+        failed_windows: 失敗Window数。
+
+    Returns:
+        {"generated_at", "run_id", "schema_version", "window_count",
+        "successful_windows", "failed_windows", "strategy", "code", "period"}
+    """
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": pipeline_result.get("run_id"),
+        "schema_version": WALKFORWARD_SUMMARY_SCHEMA_VERSION,
+        "window_count": window_count,
+        "successful_windows": successful_windows,
+        "failed_windows": failed_windows,
+        "strategy": pipeline_result.get("strategy"),
+        "code": pipeline_result.get("code"),
+        "period": pipeline_result.get("period"),
+    }
+
+
+# ════════════════════════════════════════════════
+# 入口となるAPI
+# ════════════════════════════════════════════════
+def build_walkforward_summary(
+    pipeline_result: dict[str, Any],
+    stability_config: StabilityConfig = DEFAULT_STABILITY_CONFIG,
+    health_check_config: HealthCheckConfig = DEFAULT_HEALTH_CHECK_CONFIG,
+    ranking_config: RankingConfig = DEFAULT_RANKING_CONFIG,
+    trend_config: TrendConfig = DEFAULT_TREND_CONFIG,
+    context: Optional[dict[str, Any]] = None,
+    extensions: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """run_walkforward_pipeline() の戻り値から、Walk Forward全体の品質を
+    集計したSummaryを構築する。
+
+    walkforward_pipeline.pyの各Windowが既に保持している値
+    （decision_report_result等）のみを、平均・中央値・標準偏差・
+    最良/最悪・件数集計・割合計算として集約する。新しい売買判定・
+    Rating/Confidence/Statistics/Benchmark/Validation生成・Decision
+    Engine/Strategy呼び出し・Backtest再実行は一切行わない。
+
+    Args:
+        pipeline_result: walkforward_pipeline.run_walkforward_pipeline()
+            の戻り値。
+        stability_config: Stability Score算出に使う典型ばらつき幅・重み。
+        health_check_config: Health Check算出に使う重み・閾値。
+        ranking_config: Best/Worst Window選定に使う指標と方向性。
+        trend_config: Improvement Trend判定に使う閾値。
+        context: 将来のFundamental・Dividend・AI Comment・Market Regime
+            等の追加コンテキストを見据えた予約引数（dict）。現時点では
+            内容の解釈・加工を一切行わず、指定された場合のみ戻り値の
+            "context"キーへそのまま格納する（デフォルトNone、その場合
+            戻り値にこのキーは含まれない）。
+        extensions: 将来の追加集計ステップ（例:
+            Fundamental/Dividend/AI Comment別のサマリー）を見据えた
+            予約引数（dict）。現時点では内容の解釈・実行を一切行わず、
+            指定された場合のみ戻り値の"extensions"キーへそのまま格納
+            する（デフォルトNone、その場合戻り値にこのキーは含まれない）。
+
+    Returns:
+        以下のトップレベルキーを持つJSON互換dict（"context"・
+        "extensions"を除き常にすべてのキーが存在する。キー構成は
+        固定・後方互換性を意識する）::
+
+            {
+                "summary_schema_version": "1.0",
+                "metadata": build_summary_metadata()の戻り値,
+                "health_check": build_health_check()の戻り値,
+                "stability_score": build_stability_score()の戻り値,
+                "improvement_trend": build_improvement_trend()の戻り値,
+                "benchmark_improvement_rate": build_benchmark_improvement_rate()の戻り値,
+                "metric_statistics": build_metric_statistics()の戻り値,
+                "decision_distribution": build_decision_distribution()の戻り値,
+                "best_window": ..., "worst_window": ...,
+                "window_metrics": build_window_metrics_table()の戻り値,
+                "context": context引数の値,       # contextが指定された場合のみ
+                "extensions": extensions引数の値,  # extensionsが指定された場合のみ
+            }
+    """
+    window_metrics = build_window_metrics_table(pipeline_result)
+    window_count = len(window_metrics)
+    successful_windows = sum(1 for w in window_metrics if w.get("success"))
+    failed_windows = window_count - successful_windows
+
+    validation_success_rate_pct = (
+        successful_windows / window_count * 100 if window_count > 0 else None
+    )
+
+    stability = build_stability_score(window_metrics, config=stability_config)
+    benchmark_improvement = build_benchmark_improvement_rate(pipeline_result)
+    improvement_trend = build_improvement_trend(pipeline_result, config=trend_config)
+
+    health_check = build_health_check(
+        validation_success_rate_pct=validation_success_rate_pct,
+        stability_score=stability.get("score"),
+        benchmark_improvement_rate_pct=benchmark_improvement.get("rate_pct"),
+        config=health_check_config,
+    )
+
+    best_worst = build_best_worst_window(window_metrics, config=ranking_config)
+
+    metadata = build_summary_metadata(
+        pipeline_result, window_count, successful_windows, failed_windows
+    )
+    metadata["validation_success_rate_pct"] = validation_success_rate_pct
+
+    result: dict[str, Any] = {
+        "summary_schema_version": WALKFORWARD_SUMMARY_SCHEMA_VERSION,
+        "metadata": metadata,
+        "health_check": health_check,
+        "stability_score": stability,
+        "improvement_trend": improvement_trend,
+        "benchmark_improvement_rate": benchmark_improvement,
+        "metric_statistics": build_metric_statistics(window_metrics),
+        "decision_distribution": build_decision_distribution(pipeline_result),
+        "best_window": best_worst["best"],
+        "worst_window": best_worst["worst"],
+        "window_metrics": window_metrics,
+    }
+
+    if context is not None:
+        result["context"] = context
+    if extensions is not None:
+        result["extensions"] = extensions
+
+    return result
