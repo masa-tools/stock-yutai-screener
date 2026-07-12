@@ -4,22 +4,23 @@ backtest/debug_ui.py  (v9研究開発ブランチ Phase3 - 研究・検証基盤
 Step1バックテストの結果をブラウザ（Streamlit）から確認するための
 開発・検証専用UI層。
 
-【今回の追加（Evaluation Lab: 正式インターフェースへの接続）】
-  evaluation.render_evaluation_lab() の正式シグネチャ
-  （rating_result / confidence_result / decision_result /
-  decision_report / benchmark_result / history_entries /
-  benchmarks_by_run_id / context）に合わせて呼び出し箇所を修正した。
-  引数名の不整合（旧: "benchmarks"）を解消し、すべての引数を
-  Noneのまま渡しても安全に動作する（evaluation.py側で正規化される）
-  構成にしている。debug_ui.py側はEvaluation Labへ必要なデータを
-  渡すだけ、evaluation.py側は受け取ったデータを表示用dictへ
-  変換するだけ、という役割分担は維持している。
+【今回の追加（Walk Forward Validationの画面接続）】
+  Evaluation Lab（分析・検証ハブ）の末尾セクションとして
+  「Walk Forward Validation」を追加した。銘柄・期間・戦略(v8/v9)・
+  Dry Runを選択し「▶ Walk Forward 実行」ボタンを押した時のみ
+  walkforward_runner.run_walkforward_runner()（無変更）を1回呼び出し、
+  結果をst.session_state["walkforward_runner_result"]へ保存する。
+  それ以外の再描画（他セクションの操作・閾値スライダー変更等）では
+  再実行せず、常にsession_state上の結果をそのまま表示するだけに
+  徹している。Decision/Rating/Confidence/Benchmark/Summaryの再計算は
+  一切行わない（walkforward_runner.pyへ完全委譲）。
 
-  rating.py・statistics.py・confidence.py・confidence_explain.py・
-  decision.py・decision_pipeline.py・decision_validation.py・
-  decision_report.py・benchmark.py・report_history.py・
-  strategy_v8.py・strategy_v9.py・metrics.py・comparison.py・
-  app.pyは一切変更していない。
+  walkforward.py・walkforward_decision.py・walkforward_evaluation.py・
+  walkforward_pipeline.py・walkforward_benchmark.py・
+  walkforward_summary.py・walkforward_context.py・walkforward_runner.py・
+  decision.py・rating.py・confidence.py・statistics.py・metrics.py・
+  benchmark.py・evaluation.py・validation_dashboard.py・app.pyは
+  一切変更していない。
 
 【設計方針】
   backtest/ 配下の既存ロジックには一切変更を加えず、それらを
@@ -38,8 +39,10 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
     10. Decision Card（render_decision_card。decision.pyの薄いラッパー）
     11. Evaluation Lab（評価実験基盤）（render_evaluation_lab。evaluation.pyの薄いラッパー）
     12. Evaluation Lab（分析・検証ハブ）（render_evaluation_hub_section。
-        evaluation.render_evaluation_lab()の正式インターフェースへの
-        薄いラッパー。History/Benchmarkの実データ供給を含む）
+        evaluation.render_evaluation_lab()の薄いラッパー。
+        History/Benchmarkの実データ供給を含む）
+    13. Walk Forward Validation（render_walkforward_validation_section。
+        walkforward_runner.run_walkforward_runner()の薄いラッパー）★今回追加
   将来 strategy_v10.py 等を追加する場合、STRATEGY_REGISTRY に1行
   追加するだけで比較対象に組み込める（他の層は変更不要）。
 
@@ -48,7 +51,9 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
     Confidence分布・閾値影響・銘柄比較）を目的とした従来の実験基盤。
     12.は Rating→Confidence→Decision→Decision Report→Benchmark→History
     という分析パイプライン全体の結果を統合表示する新しいハブ。
-    両者は独立しており、互いのセクションを変更・削除していない。
+    13.は12.の末尾に配置される、Walk Forward検証（時系列の過剰適合
+    チェック）専用のセクション。
+    いずれも独立しており、互いのセクションを変更・削除していない。
 
 【重要：バックテストは「選択した条件ごとに」一度だけ実行】
   「▶ 実行」ボタンを押したときのみ、選択中の (銘柄, 期間, ロジック) の
@@ -62,6 +67,11 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
   Evaluation History（evaluation_history）も同様の考え方で、
   同一(銘柄,期間,ロジック)の組み合わせにつき1件のみ記録する
   （Streamlitの再描画のたびに重複登録しない）。
+
+  Walk Forward Validation（walkforward_runner_result）も同様に、
+  「▶ Walk Forward 実行」ボタンが押された時のみrun_walkforward_runner()
+  を呼び出し、結果をsession_stateへ保存する。それ以外の再描画では
+  session_state上の結果をそのまま表示するだけで、再実行はしない。
 
 【削除容易性について】
   このファイル1つに開発用UIロジックを集約している。
@@ -103,6 +113,7 @@ from backtest.decision_report import build_decision_report
 from backtest.report_history import build_history_entry
 from backtest.benchmark import build_benchmark
 from backtest import evaluation
+from backtest.walkforward_runner import run_walkforward_runner
 
 
 # ════════════════════════════════════════════════
@@ -164,6 +175,10 @@ _SS_KEY_HISTORY = "evaluation_history"
 # 同一組み合わせでの重複登録を防ぐための索引。
 _SS_KEY_HISTORY_INDEX = "evaluation_history_index"
 _HISTORY_MAX_ENTRIES = 20
+
+# ── Walk Forward Validation の実行結果セッションキー ────────
+# 値は walkforward_runner.run_walkforward_runner() の戻り値そのもの。
+_SS_KEY_WF_RESULT = "walkforward_runner_result"
 
 # ── Decision表示用の★マッピング（表示専用。判断ロジックではない） ──
 # decision.build_decision() が返す "decision" 文字列を★の数に変換するだけの
@@ -1156,7 +1171,8 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
     evaluation.render_evaluation_lab()（正式インターフェース。
     Rating→Confidence→Decision→Decision Report→Benchmark→History
     Summaryの表示用dictを組み立てるオーケストレーター）を呼び出し、
-    その戻り値をそのまま表示する。
+    その戻り値をそのまま表示する。末尾にWalk Forward Validation
+    セクションを追加している。
 
     Rating/Confidence/Decisionはrating_bundle（render_rating_card内で
     既に計算済み）をそのまま渡し、再計算しない。Decision Reportは
@@ -1170,10 +1186,9 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
     渡して比較する。History Summaryには軽量化した履歴一覧
     （_build_lightweight_history_rows）のみを渡す。
 
-    render_evaluation_lab()へは正式引数名（history_entries /
-    benchmarks_by_run_id）で渡す。いずれの引数もNoneのまま渡しても
-    evaluation.py側で安全に正規化されるため、ここでの明示的な
-    Noneチェックは不要。
+    rating_bundleがNone（評価データ未算出）の場合でも、Walk Forward
+    Validationセクションは独立して表示する（Rating等の算出結果には
+    依存しないため）。
 
     st.expander で折りたたみ、通常のバックテスト閲覧を邪魔しないように
     している。将来Streamlit以外の画面（本番画面・レポート生成画面等）へ
@@ -1186,7 +1201,7 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
             （code/strategy_key/strategy_label等を含む）。
         rating_bundle: render_rating_card()の戻り値
             （{"rating","stats","confidence","decision"}）。
-            Noneの場合はデータ不足として全セクションを
+            Noneの場合はRating〜History Summaryをデータ不足として
             フォールバック表示する。
     """
     with st.expander("🧪 Evaluation Lab（分析・検証ハブ）", expanded=False):
@@ -1200,66 +1215,68 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
                 "評価データ（Rating/Confidence/Decision）がまだ算出されていません。"
                 " 上部の評価カードの表示を確認してください。"
             )
-            return
+        else:
+            rating = rating_bundle["rating"]
+            confidence = rating_bundle["confidence"]
+            decision = rating_bundle["decision"]
 
-        rating = rating_bundle["rating"]
-        confidence = rating_bundle["confidence"]
-        decision = rating_bundle["decision"]
+            try:
+                pipeline_df = attach_decision_columns(res_df, meta["strategy_key"])
+                decision_report_result = build_decision_report(
+                    pipeline_df, strategy_name=meta["strategy_label"], code=meta["code"]
+                )
+            except Exception:
+                st.warning("Decision Reportの生成中にエラーが発生したため、この区間は「データなし」として表示します。")
+                decision_report_result = {"report_info": {}}
 
-        try:
-            pipeline_df = attach_decision_columns(res_df, meta["strategy_key"])
-            decision_report_result = build_decision_report(
-                pipeline_df, strategy_name=meta["strategy_label"], code=meta["code"]
+            benchmark_result = None
+            benchmark_note = None
+            history_rows: list[dict] = []
+            benchmarks_by_run_id: dict[str, dict] = {}
+
+            try:
+                _get_or_create_history_entry(res_df, meta, decision_report_result)
+                history: list[dict] = st.session_state.get(_SS_KEY_HISTORY, [])
+
+                pair = _select_benchmark_pair(history)
+                if pair is not None:
+                    entry_before, entry_after = pair
+                    benchmark_result = build_benchmark(entry_before, entry_after)
+                    benchmarks_by_run_id[entry_after.get("run_id")] = benchmark_result
+                else:
+                    benchmark_note = "比較には2件以上の履歴が必要です。"
+
+                history_rows = _build_lightweight_history_rows(history)
+            except Exception:
+                st.warning("History/Benchmarkの生成中にエラーが発生したため、この区間は「データなし」として表示します。")
+                history_rows = []
+
+            lab = evaluation.render_evaluation_lab(
+                rating_result=rating,
+                confidence_result=confidence,
+                decision_result=decision,
+                decision_report=decision_report_result,
+                benchmark_result=benchmark_result,
+                history_entries=history_rows,
+                benchmarks_by_run_id=benchmarks_by_run_id,
             )
-        except Exception:
-            st.warning("Decision Reportの生成中にエラーが発生したため、この区間は「データなし」として表示します。")
-            decision_report_result = {"report_info": {}}
 
-        benchmark_result = None
-        benchmark_note = None
-        history_rows: list[dict] = []
-        benchmarks_by_run_id: dict[str, dict] = {}
+            _render_eval_rating(lab.get("rating"))
+            st.divider()
+            _render_eval_confidence(lab.get("confidence"))
+            st.divider()
+            _render_eval_decision(lab.get("decision"))
+            st.divider()
+            _render_eval_decision_report(lab.get("decision_report"))
+            st.divider()
+            _render_eval_benchmark(lab.get("benchmark"), note=benchmark_note)
+            st.divider()
+            _render_eval_history(lab.get("history_summary"))
 
-        try:
-            _get_or_create_history_entry(res_df, meta, decision_report_result)
-            history: list[dict] = st.session_state.get(_SS_KEY_HISTORY, [])
+            st.caption(f"Evaluation Lab schema version: {lab.get('evaluation_schema_version', '―')}")
 
-            pair = _select_benchmark_pair(history)
-            if pair is not None:
-                entry_before, entry_after = pair
-                benchmark_result = build_benchmark(entry_before, entry_after)
-                benchmarks_by_run_id[entry_after.get("run_id")] = benchmark_result
-            else:
-                benchmark_note = "比較には2件以上の履歴が必要です。"
-
-            history_rows = _build_lightweight_history_rows(history)
-        except Exception:
-            st.warning("History/Benchmarkの生成中にエラーが発生したため、この区間は「データなし」として表示します。")
-            history_rows = []
-
-        lab = evaluation.render_evaluation_lab(
-            rating_result=rating,
-            confidence_result=confidence,
-            decision_result=decision,
-            decision_report=decision_report_result,
-            benchmark_result=benchmark_result,
-            history_entries=history_rows,
-            benchmarks_by_run_id=benchmarks_by_run_id,
-        )
-
-        _render_eval_rating(lab.get("rating"))
         st.divider()
-        _render_eval_confidence(lab.get("confidence"))
-        st.divider()
-        _render_eval_decision(lab.get("decision"))
-        st.divider()
-        _render_eval_decision_report(lab.get("decision_report"))
-        st.divider()
-        _render_eval_benchmark(lab.get("benchmark"), note=benchmark_note)
-        st.divider()
-        _render_eval_history(lab.get("history_summary"))
-
-        st.caption(f"Evaluation Lab schema version: {lab.get('evaluation_schema_version', '―')}")
+        render_walkforward_validation_section(meta)
 
 
 def _render_eval_rating(view: dict | None) -> None:
@@ -1398,6 +1415,171 @@ def _render_eval_history(view: dict | None) -> None:
         return
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ════════════════════════════════════════════════
+# Walk Forward Validation（walkforward_runner.pyの薄いラッパー）★今回追加
+# ════════════════════════════════════════════════
+def render_walkforward_validation_section(meta: dict) -> None:
+    """
+    Walk Forward Validation（時系列検証）セクションを表示する。
+
+    「▶ Walk Forward 実行」ボタンが押された時のみ
+    walkforward_runner.run_walkforward_runner()（無変更）を1回呼び出し、
+    結果をst.session_state[_SS_KEY_WF_RESULT]へ保存する。それ以外の
+    Streamlit再描画（他セクションの操作等）では再実行せず、
+    session_state上の結果をそのまま表示するだけに徹する。
+    Decision/Rating/Confidence/Benchmark/Summaryの計算はここでは
+    一切行わない（run_walkforward_runner()へ完全委譲）。
+
+    Args:
+        meta: 現在表示中のバックテスト条件のメタ情報
+            （code/period_label/strategy_key等）。Walk Forward側の
+            初期選択値のデフォルトとして利用するのみで、値そのものの
+            加工は行わない。
+    """
+    st.markdown("### 🧭 Walk Forward Validation")
+    st.caption(
+        "既存バックテスト結果をtrain/validation期間に分割し、"
+        "Decision Engineが異なる期間でも同じ品質を維持できているか（過剰適合の有無）を検証します。"
+        "（walkforward_runner.py の実行結果をそのまま表示するだけです）"
+    )
+
+    code_options = list(STOCK_CANDIDATES.keys())
+    default_code = meta.get("code") if meta.get("code") in STOCK_CANDIDATES else DEFAULT_CODE
+
+    period_options = list(PERIOD_OPTIONS.keys())
+    default_period_label = (
+        meta.get("period_label") if meta.get("period_label") in PERIOD_OPTIONS else DEFAULT_PERIOD_LABEL
+    )
+
+    wf_strategy_options = ["v9", "v8"]
+    default_strategy_key = (
+        meta.get("strategy_key") if meta.get("strategy_key") in wf_strategy_options else "v9"
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        wf_code = st.selectbox(
+            "対象銘柄",
+            options=code_options,
+            index=code_options.index(default_code),
+            format_func=lambda c: f"{c} {STOCK_CANDIDATES[c]}",
+            key="wf_code_select",
+        )
+    with col2:
+        wf_period_label = st.selectbox(
+            "対象期間",
+            options=period_options,
+            index=period_options.index(default_period_label),
+            key="wf_period_select",
+        )
+    with col3:
+        wf_strategy_key = st.selectbox(
+            "戦略",
+            options=wf_strategy_options,
+            index=wf_strategy_options.index(default_strategy_key),
+            format_func=lambda k: STRATEGY_REGISTRY[k]["label"],
+            key="wf_strategy_select",
+        )
+    with col4:
+        wf_dry_run = st.checkbox("Dry Run", value=False, key="wf_dry_run_checkbox")
+
+    if wf_dry_run:
+        st.info("ℹ️ Dry Run時はBenchmarkは実行されません。")
+
+    run_clicked = st.button("▶ Walk Forward 実行", key="wf_run_button")
+
+    if run_clicked:
+        wf_period_code = PERIOD_OPTIONS[wf_period_label]
+        compute_fn = STRATEGY_REGISTRY[wf_strategy_key]["compute_fn"]
+        with st.spinner("Walk Forward Validationを実行中..."):
+            try:
+                result = run_walkforward_runner(
+                    code=wf_code,
+                    strategy_fn=compute_fn,
+                    strategy_name=wf_strategy_key,
+                    period=wf_period_code,
+                    dry_run=wf_dry_run,
+                )
+                st.session_state[_SS_KEY_WF_RESULT] = result
+            except Exception:
+                st.error("❌ Walk Forward Validation実行中にエラーが発生しました。")
+                st.code(traceback.format_exc(), language="text")
+                return
+
+    result = st.session_state.get(_SS_KEY_WF_RESULT)
+    if result is None:
+        st.info("「▶ Walk Forward 実行」ボタンを押すと検証を開始します。")
+        return
+
+    render_walkforward_runner_result(result)
+
+
+def render_walkforward_runner_result(result: dict) -> None:
+    """
+    walkforward_runner.run_walkforward_runner() の戻り値をそのまま表示する。
+
+    このファイルはデータ加工を一切行わず、渡されたdictの中身も
+    書き換えない（get()による読み取りのみ）。
+    """
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Status", result.get("status") or "―")
+    col2.metric("Elapsed(sec)", _fmt(result.get("elapsed_seconds")))
+    col3.metric("Run ID", result.get("run_id") or "―")
+
+    st.caption(
+        f"開始: {result.get('started_at') or '―'} / "
+        f"終了: {result.get('finished_at') or '―'}"
+    )
+
+    if result.get("dry_run"):
+        st.info("ℹ️ Dry Run実行のため、Benchmarkは実行されていません。")
+
+    stage_status = result.get("stage_status") or {}
+    stage_elapsed = result.get("stage_elapsed") or {}
+    if stage_status or stage_elapsed:
+        st.markdown("##### Stage")
+        stage_names = list(dict.fromkeys(list(stage_status.keys()) + list(stage_elapsed.keys())))
+        stage_rows = [
+            {
+                "stage": name,
+                "status": stage_status.get(name),
+                "elapsed_seconds": stage_elapsed.get(name),
+            }
+            for name in stage_names
+        ]
+        st.dataframe(pd.DataFrame(stage_rows), use_container_width=True, hide_index=True)
+
+    errors = result.get("errors")
+    if errors:
+        for e in errors:
+            st.error(e if isinstance(e, str) else str(e))
+
+    result_warnings = result.get("warnings")
+    if result_warnings:
+        for w in result_warnings:
+            st.warning(w if isinstance(w, str) else str(w))
+
+    summary = result.get("summary")
+    if summary:
+        with st.expander("📊 Summary"):
+            st.json(summary)
+
+    context = result.get("context")
+    if context:
+        with st.expander("🧩 Context"):
+            st.json(context)
+
+    pipeline = result.get("pipeline")
+    if pipeline:
+        with st.expander("⚙️ Pipeline"):
+            st.json(pipeline)
+
+    benchmark = result.get("benchmark")
+    if benchmark:
+        with st.expander("🆚 Benchmark"):
+            st.json(benchmark)
 
 
 # ────────────────────────────────────────────────
