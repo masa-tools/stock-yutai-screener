@@ -30,7 +30,7 @@ walkforward_benchmark.py・walkforward_summary.py・walkforward_context.py）
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, TypedDict
+from typing import Any, Literal, Mapping, Optional, TypedDict
 
 __all__ = [
     # 汎用
@@ -81,6 +81,13 @@ __all__ = [
     "ContextSummary",
     "Navigation",
     "WalkForwardContextResult",
+    # walkforward_runner.py
+    "RunnerStatus",
+    "RunnerStageName",
+    "RunnerStageStatusValue",
+    "RunnerStageStatusMap",
+    "RunnerStageElapsedMap",
+    "WalkForwardRunnerResult",
 ]
 
 
@@ -550,6 +557,70 @@ class _WalkForwardContextResultRequired(TypedDict):
 class WalkForwardContextResult(_WalkForwardContextResultRequired, total=False):
     """walkforward_context.build_walkforward_context() の戻り値。"""
     context: Mapping[str, Any]
+    extensions: Mapping[str, Any]
+    ai_context: Mapping[str, Any]
+    fundamental_context: Mapping[str, Any]
+    dividend_context: Mapping[str, Any]
+    market_context: Mapping[str, Any]
+
+
+# ════════════════════════════════════════════════
+# walkforward_runner.py
+# ════════════════════════════════════════════════
+# 【重要】この節は backtest/walkforward_runner.py の実ソースを直接確認した
+# うえで、その戻り値構造（_build_result()）と完全に一致させて定義している。
+# 特に以下2点は実装との整合性上、重要な注意点である：
+#   1. run_walkforward_runner() の戻り値に "dry_run" キーは存在しない。
+#      Dry Runの実施有無は stage_status（benchmark/summary/contextが
+#      "SKIPPED"かどうか）から判断する。
+#   2. 戻り値の "context" キーは Stage4（build_walkforward_context()）の
+#      実行結果である。Runnerの引数として渡された context（将来拡張用の
+#      予約dict）が指定された場合は、別キー "context_input" へ格納される
+#      （"context"と"context_input"は意味が異なる）。
+
+RunnerStatus = Literal["SUCCESS", "PARTIAL_SUCCESS", "FAILED"]
+
+RunnerStageName = Literal["pipeline", "benchmark", "summary", "context"]
+
+RunnerStageStatusValue = Literal["SUCCESS", "FAILED", "SKIPPED"]
+
+#: run_walkforward_runner() の "stage_status" キー。
+#: 実装上はdict[str, str]だが、キー・値の取りうる範囲を
+#: RunnerStageName / RunnerStageStatusValue として明示するための別名。
+RunnerStageStatusMap = Mapping[RunnerStageName, RunnerStageStatusValue]
+
+#: run_walkforward_runner() の "stage_elapsed" キー（各Stageの所要秒数）。
+RunnerStageElapsedMap = Mapping[RunnerStageName, float]
+
+
+class _WalkForwardRunnerResultRequired(TypedDict):
+    runner_schema_version: str
+    run_id: str
+    started_at: str
+    finished_at: str
+    elapsed_seconds: float
+    status: RunnerStatus
+    pipeline: Optional[WalkForwardPipelineResult]
+    benchmark: Optional[WalkForwardBenchmarkResult]
+    summary: Optional[WalkForwardSummaryResult]
+    # Stage4（build_walkforward_context()）の実行結果。
+    # Runner引数の"context"（予約入力）とは異なる（後述のcontext_input参照）。
+    context: Optional[WalkForwardContextResult]
+    stage_status: RunnerStageStatusMap
+    stage_elapsed: RunnerStageElapsedMap
+    errors: list[StageErrorEntry]
+    warnings: list[StageErrorEntry]
+
+
+class WalkForwardRunnerResult(_WalkForwardRunnerResultRequired, total=False):
+    """walkforward_runner.run_walkforward_runner() の戻り値。
+
+    以下のキーは、対応する予約引数が呼び出し時に指定された場合のみ
+    含まれる（Noneの場合はキー自体が戻り値に存在しない）。
+    """
+    #: Runner引数の"context"（将来拡張用の予約dict）がそのまま格納される。
+    #: 戻り値の"context"キー（Stage4結果）とは意味が異なる点に注意。
+    context_input: Mapping[str, Any]
     extensions: Mapping[str, Any]
     ai_context: Mapping[str, Any]
     fundamental_context: Mapping[str, Any]
