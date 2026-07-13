@@ -20,6 +20,11 @@ Benchmarkデータについての申し送り:
     に有効化される任意参照として実装しており、データが無い場合は
     "insufficient_data"を返す（既存値の捏造はしない）。
 
+    JSON構造の詳細は backtest.types（WindowMetric・
+    WalkForwardSummaryResult等）を参照。pipeline_resultの"windows"層は
+    正常/異常経路で構造が変わりうるため、Mapping[str, object]で受け取る
+    （backtest.types内のコメント参照）。
+
 Public API:
     RankingConfig, StabilityConfig, HealthCheckConfig, TrendConfig,
     build_window_metrics_table, build_decision_distribution,
@@ -34,7 +39,21 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
+from typing import Mapping, Optional
+
+from backtest.types import (
+    BenchmarkImprovementRate,
+    BestWorstEntry,
+    HealthCheck,
+    ImprovementTrend,
+    MetricStatEntry,
+    StabilityMetricEntry,
+    StabilityScore,
+    SummaryMetadata,
+    WalkForwardPipelineResult,
+    WalkForwardSummaryResult,
+    WindowMetric,
+)
 
 __all__ = [
     "WALKFORWARD_SUMMARY_SCHEMA_VERSION",
@@ -203,7 +222,7 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, value))
 
 
-def _extract_raw_windows(pipeline_result: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _extract_raw_windows(pipeline_result: Mapping[str, object]) -> list[dict[str, object]]:
     """run_walkforward_pipeline() の戻り値からWindowのリストを取り出す。"""
     layer = pipeline_result.get("windows")
     if isinstance(layer, dict):
@@ -214,7 +233,7 @@ def _extract_raw_windows(pipeline_result: Mapping[str, Any]) -> list[dict[str, A
     return []
 
 
-def _aggregate_window(window: Mapping[str, Any]) -> dict[str, Any]:
+def _aggregate_window(window: Mapping[str, object]) -> WindowMetric:
     """1つのWindowのdecision_report_resultを、count重み付き平均・最悪値でWindow単位の1レコードへ縮約する。
 
     max_ddのみ最小値（テールリスクの悪化を薄めない）で集約し、他は
@@ -276,7 +295,7 @@ def _aggregate_window(window: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_window_metrics_table(pipeline_result: Mapping[str, Any]) -> list[dict[str, Any]]:
+def build_window_metrics_table(pipeline_result: WalkForwardPipelineResult) -> list[WindowMetric]:
     """パイプライン結果の全Windowを、Window単位の集約dictのリストへ変換する。
 
     Args:
@@ -288,7 +307,7 @@ def build_window_metrics_table(pipeline_result: Mapping[str, Any]) -> list[dict[
     return [_aggregate_window(w) for w in _extract_raw_windows(pipeline_result)]
 
 
-def build_decision_distribution(pipeline_result: Mapping[str, Any]) -> dict[str, int]:
+def build_decision_distribution(pipeline_result: WalkForwardPipelineResult) -> dict[str, int]:
     """全Windowのdecision_report_resultから、Decisionラベルごとの件数を合算する。
 
     Args:
@@ -309,7 +328,7 @@ def build_decision_distribution(pipeline_result: Mapping[str, Any]) -> dict[str,
     return distribution
 
 
-def build_metric_statistics(window_metrics: list[Mapping[str, Any]]) -> dict[str, dict[str, Optional[float]]]:
+def build_metric_statistics(window_metrics: list[WindowMetric]) -> dict[str, MetricStatEntry]:
     """Window単位の集約値について、指標ごとの平均・中央値・標準偏差を算出する（成功Windowのみ対象）。
 
     Args:
@@ -319,7 +338,7 @@ def build_metric_statistics(window_metrics: list[Mapping[str, Any]]) -> dict[str
         {指標名: {"mean", "median", "stdev"}} のdict。
     """
     successful = [w for w in window_metrics if w.get("success")]
-    result: dict[str, dict[str, Optional[float]]] = {}
+    result: dict[str, MetricStatEntry] = {}
     for field_name in _WEIGHTED_MEAN_FIELDS + ("max_dd",):
         values = [w[field_name] for w in successful if w.get(field_name) is not None]
         result[field_name] = {"mean": _mean(values), "median": _median(values), "stdev": _stdev(values)}
@@ -327,9 +346,9 @@ def build_metric_statistics(window_metrics: list[Mapping[str, Any]]) -> dict[str
 
 
 def build_stability_score(
-    window_metrics: list[Mapping[str, Any]],
+    window_metrics: list[WindowMetric],
     config: StabilityConfig = DEFAULT_STABILITY_CONFIG,
-) -> dict[str, Any]:
+) -> StabilityScore:
     """Window間のReturn/WinRate/MaxDD/Confidenceのばらつき（標準偏差）から、0〜100のStability Scoreを算出する。
 
     標準偏差が典型幅(config.expected_std)と同程度ならスコア50前後、
@@ -343,7 +362,7 @@ def build_stability_score(
         {"score": 0〜100 | None, "per_metric": {指標名: {"stdev", "score"}}}。
     """
     successful = [w for w in window_metrics if w.get("success")]
-    per_metric: dict[str, dict[str, Optional[float]]] = {}
+    per_metric: dict[str, StabilityMetricEntry] = {}
     weighted_sum = weight_total = 0.0
 
     for field_name, expected in config.expected_std.items():
@@ -365,7 +384,7 @@ def build_stability_score(
     return {"score": overall_score, "per_metric": per_metric}
 
 
-def _extract_benchmark_results(pipeline_result: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _extract_benchmark_results(pipeline_result: WalkForwardPipelineResult) -> list[dict[str, object]]:
     """各Windowから任意の"benchmark_result"キーを取り出す（現行パイプラインは通常空リストを返す）。"""
     entries = []
     for window in _extract_raw_windows(pipeline_result):
@@ -380,7 +399,7 @@ def _extract_benchmark_results(pipeline_result: Mapping[str, Any]) -> list[dict[
     return entries
 
 
-def build_benchmark_improvement_rate(pipeline_result: Mapping[str, Any]) -> dict[str, Any]:
+def build_benchmark_improvement_rate(pipeline_result: WalkForwardPipelineResult) -> BenchmarkImprovementRate:
     """全Windowのbenchmark_result（存在する場合のみ）から、改善したWindowの割合を算出する。
 
     Args:
@@ -403,9 +422,9 @@ def build_benchmark_improvement_rate(pipeline_result: Mapping[str, Any]) -> dict
 
 
 def build_improvement_trend(
-    pipeline_result: Mapping[str, Any],
+    pipeline_result: WalkForwardPipelineResult,
     config: TrendConfig = DEFAULT_TREND_CONFIG,
-) -> dict[str, Any]:
+) -> ImprovementTrend:
     """Window順のBenchmark improvement_scoreの推移から、改善/横ばい/悪化のトレンドを判定する。
 
     Benchmark結果のみを根拠とし、Decision Report等の他指標からの代用
@@ -455,7 +474,7 @@ def build_health_check(
     stability_score: Optional[float],
     benchmark_improvement_rate_pct: Optional[float],
     config: HealthCheckConfig = DEFAULT_HEALTH_CHECK_CONFIG,
-) -> dict[str, Any]:
+) -> HealthCheck:
     """既存の集計値から、Walk Forward全体の品質をExcellent/Good/Fair/Poorの4段階で判定する。
 
     各入力がNone（データ不足）の場合、その指標の重みは0として除外され
@@ -504,9 +523,9 @@ def build_health_check(
 
 
 def build_best_worst_window(
-    window_metrics: list[Mapping[str, Any]],
+    window_metrics: list[WindowMetric],
     config: RankingConfig = DEFAULT_RANKING_CONFIG,
-) -> dict[str, Optional[dict[str, Any]]]:
+) -> dict[str, Optional[BestWorstEntry]]:
     """指定した指標で、成功Windowの中から最良・最悪のWindowを選ぶ。
 
     Args:
@@ -522,7 +541,7 @@ def build_best_worst_window(
 
     ordered = sorted(candidates, key=lambda w: w[config.metric], reverse=config.higher_is_better)
 
-    def _to_entry(w: Mapping[str, Any]) -> dict[str, Any]:
+    def _to_entry(w: WindowMetric) -> BestWorstEntry:
         return {
             "run_id": w.get("run_id"),
             "validation_period_id": w.get("validation_period_id"),
@@ -537,11 +556,11 @@ def build_best_worst_window(
 
 
 def build_summary_metadata(
-    pipeline_result: Mapping[str, Any],
+    pipeline_result: WalkForwardPipelineResult,
     window_count: int,
     successful_windows: int,
     failed_windows: int,
-) -> dict[str, Any]:
+) -> SummaryMetadata:
     """パイプライン結果から、Summary全体のメタ情報を組み立てる。
 
     Args:
@@ -553,6 +572,8 @@ def build_summary_metadata(
     Returns:
         {"generated_at", "run_id", "schema_version", "window_count",
         "successful_windows", "failed_windows", "strategy", "code", "period"}。
+        （validation_success_rate_pctは呼び出し元のbuild_walkforward_summary()
+        側で追加される）
     """
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -568,14 +589,14 @@ def build_summary_metadata(
 
 
 def build_walkforward_summary(
-    pipeline_result: Mapping[str, Any],
+    pipeline_result: WalkForwardPipelineResult,
     stability_config: StabilityConfig = DEFAULT_STABILITY_CONFIG,
     health_check_config: HealthCheckConfig = DEFAULT_HEALTH_CHECK_CONFIG,
     ranking_config: RankingConfig = DEFAULT_RANKING_CONFIG,
     trend_config: TrendConfig = DEFAULT_TREND_CONFIG,
-    context: Optional[Mapping[str, Any]] = None,
-    extensions: Optional[Mapping[str, Any]] = None,
-) -> dict[str, Any]:
+    context: Optional[Mapping[str, object]] = None,
+    extensions: Optional[Mapping[str, object]] = None,
+) -> WalkForwardSummaryResult:
     """run_walkforward_pipeline() の戻り値から、Walk Forward全体の品質を集計したSummaryを構築する。
 
     Args:
@@ -590,10 +611,7 @@ def build_walkforward_summary(
             のみ戻り値の"extensions"キーへそのまま格納する。
 
     Returns:
-        summary_schema_version・metadata・health_check・stability_score・
-        improvement_trend・benchmark_improvement_rate・metric_statistics・
-        decision_distribution・best_window・worst_window・window_metrics
-        を持つJSON互換dict。
+        WalkForwardSummaryResult（backtest.types参照）。
     """
     window_metrics = build_window_metrics_table(pipeline_result)
     window_count = len(window_metrics)
@@ -620,7 +638,7 @@ def build_walkforward_summary(
     metadata = build_summary_metadata(pipeline_result, window_count, successful_windows, failed_windows)
     metadata["validation_success_rate_pct"] = validation_success_rate_pct
 
-    result: dict[str, Any] = {
+    result: WalkForwardSummaryResult = {
         "summary_schema_version": WALKFORWARD_SUMMARY_SCHEMA_VERSION,
         "metadata": metadata,
         "health_check": health_check,
