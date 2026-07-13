@@ -1522,6 +1522,12 @@ def render_walkforward_runner_result(result: dict) -> None:
 
     このファイルはデータ加工を一切行わず、渡されたdictの中身も
     書き換えない（get()による読み取りのみ）。
+
+   【修正メモ】戻り値に"dry_run"キーは存在しないため、Dry Run実施の
+    判定は stage_status["benchmark"] が "SKIPPED" かどうかで行う
+    （実ファイル監査で判明した仕様に合わせた読み取り方法の変更のみ。
+    Runner本体・辞書構造は無変更）。errors/warningsは{"stage","message"}
+    のdictのため、st.error()/st.warning()には整形した文字列を渡す。
     """
     col1, col2, col3 = st.columns(3)
     col1.metric("Status", result.get("status") or "―")
@@ -1533,7 +1539,8 @@ def render_walkforward_runner_result(result: dict) -> None:
         f"終了: {result.get('finished_at') or '―'}"
     )
 
-    if result.get("dry_run"):
+    stage_status_for_dry_run_check = result.get("stage_status") or {}
+    if stage_status_for_dry_run_check.get("benchmark") == "SKIPPED":
         st.info("ℹ️ Dry Run実行のため、Benchmarkは実行されていません。")
 
     stage_status = result.get("stage_status") or {}
@@ -1554,12 +1561,12 @@ def render_walkforward_runner_result(result: dict) -> None:
     errors = result.get("errors")
     if errors:
         for e in errors:
-            st.error(e if isinstance(e, str) else str(e))
+            st.error(_format_stage_message(e))
 
     result_warnings = result.get("warnings")
     if result_warnings:
         for w in result_warnings:
-            st.warning(w if isinstance(w, str) else str(w))
+            st.warning(_format_stage_message(w))
 
     summary = result.get("summary")
     if summary:
@@ -1580,6 +1587,24 @@ def render_walkforward_runner_result(result: dict) -> None:
     if benchmark:
         with st.expander("🆚 Benchmark"):
             st.json(benchmark)
+
+
+def _format_stage_message(entry) -> str:
+    """
+    walkforward_runner.run_walkforward_runner() が返す errors/warnings の
+    1要素（{"stage": str, "message": str} というdict）を、
+    "[stage] message" 形式の読みやすい文字列へ整形する。
+
+    dict構造自体は変更しない（表示直前の読み取り専用の整形のみ）。
+    想定外の形（文字列やstage/messageキーを持たないdict等）が来ても
+    エラーにせず、可能な範囲でフォールバック表示する。
+    """
+    if isinstance(entry, dict):
+        stage = entry.get("stage", "?")
+        message = entry.get("message", str(entry))
+        return f"[{stage}] {message}"
+    return str(entry)
+
 
 
 # ────────────────────────────────────────────────
