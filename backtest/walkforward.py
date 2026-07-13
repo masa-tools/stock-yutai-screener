@@ -20,20 +20,19 @@
     避けられないためであり、外部への戻り値・公開インターフェースは
     JSON互換dict/listに統一している。Streamlitへの依存は持たない。
 
+    JSON構造の詳細は backtest.types（WindowRecord・
+    WalkForwardValidationResult等）を参照。
+
 【WindowSplitterについて】
     将来のRolling Window・Expanding Windowへの拡張を見据え、
     「日付のリストを受け取り、(train_dates, validation_dates)の
     組を複数生成する」という責務を WindowSplitter という抽象基底
     クラスに切り出している。今回実装するのは固定期間分割
-    （FixedWindowSplitter）のみだが、将来
-        - RollingWindowSplitter（一定幅の窓をスライドさせる）
-        - ExpandingWindowSplitter（trainの開始点を固定し終了点だけ伸ばす）
-    を追加する場合も、WindowSplitterを継承した新しいクラスを追加する
-    だけでよく、run_walkforward_validation() 本体は変更不要な設計に
-    している。
+    （FixedWindowSplitter）のみだが、将来のサブクラス追加時も
+    run_walkforward_validation() 本体は変更不要な設計にしている。
 
 Public API:
-    WindowSplit, WindowSplitter, FixedWindowSplitter,
+    WindowSplit, WindowSplitter, FixedWindowSplitter, StrategyFn,
     run_walkforward_validation
 """
 
@@ -48,12 +47,14 @@ import pandas as pd
 
 from backtest.data_loader import fetch_stock_data
 from backtest.backtest_runner import run_backtest
+from backtest.types import SplitterDescription, ValidationRecord, WindowRecord, WalkForwardValidationResult
 
 __all__ = [
     "WALKFORWARD_SCHEMA_VERSION",
     "WindowSplit",
     "WindowSplitter",
     "FixedWindowSplitter",
+    "StrategyFn",
     "run_walkforward_validation",
 ]
 
@@ -198,14 +199,14 @@ def _to_json_safe(value: Any) -> Any:
         return str(value)
 
 
-def _row_to_record(row: pd.Series) -> dict[str, Any]:
+def _row_to_record(row: pd.Series) -> ValidationRecord:
     """DataFrameの1行をJSON互換dictへ変換する。"""
     return {col: _to_json_safe(row[col]) for col in row.index}
 
 
-def _describe_splitter(splitter: WindowSplitter) -> dict[str, Any]:
+def _describe_splitter(splitter: WindowSplitter) -> SplitterDescription:
     """splitterの設定内容をJSON互換dictとして記述する（デバッグ・再現性確認用）。"""
-    info: dict[str, Any] = {"type": type(splitter).__name__}
+    info: SplitterDescription = {"type": type(splitter).__name__}
     if isinstance(splitter, FixedWindowSplitter):
         info["n_splits"] = splitter.n_splits
         info["train_ratio"] = splitter.train_ratio
@@ -220,7 +221,7 @@ def run_walkforward_validation(
     period: str = "1y",
     splitter: WindowSplitter | None = None,
     date_col: str = "date",
-) -> dict[str, Any]:
+) -> WalkForwardValidationResult:
     """既存バックテストを1回実行し、その結果を期間で分割してValidation
     区間だけを収集する、Walk Forward Validationの実行エントリポイント。
 
@@ -244,16 +245,14 @@ def run_walkforward_validation(
         date_col: res_df内の判定日列名。
 
     Returns:
-        walkforward_schema_version・code・strategy_name・period・
-        splitter・total_days・windows（各windowはvalidation_period_id・
-        train/validation境界情報・validation_recordsを持つJSON互換dict）
-        を持つdict。データ取得失敗・res_dfが空・分割不能の場合、
-        "windows" は空リストになる（例外は送出しない）。
+        WalkForwardValidationResult（backtest.types参照）。データ取得
+        失敗・res_dfが空・分割不能の場合、"windows" は空リストになる
+        （例外は送出しない）。
     """
     if splitter is None:
         splitter = FixedWindowSplitter()
 
-    result: dict[str, Any] = {
+    result: WalkForwardValidationResult = {
         "walkforward_schema_version": WALKFORWARD_SCHEMA_VERSION,
         "code": code,
         "strategy_name": strategy_name,
@@ -279,7 +278,7 @@ def run_walkforward_validation(
     if not window_splits:
         return result
 
-    windows_out: list[dict[str, Any]] = []
+    windows_out: list[WindowRecord] = []
     for split in window_splits:
         validation_rows = res_df[res_df[date_col].isin(split.validation_dates)]
         if validation_rows.empty:
