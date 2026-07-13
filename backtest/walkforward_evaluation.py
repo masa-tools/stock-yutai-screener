@@ -20,6 +20,9 @@ decision_report.build_decision_report() を適用し、期間ごとの評価・
     1つのValidation期間の処理で例外が発生しても、そのウィンドウのみ
     errorフィールドへ記録し、他のウィンドウの処理は継続する。
 
+    JSON構造の詳細は backtest.types（EvaluationWindowRecord・
+    WalkForwardEvaluationResult等）を参照。
+
 Public API:
     run_walkforward_evaluation
 """
@@ -28,12 +31,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Mapping, Optional
+from typing import Optional
 
 import pandas as pd
 
 from backtest.decision_validation import build_decision_validation_summary
 from backtest.decision_report import build_decision_report
+from backtest.types import (
+    DecisionReportResult,
+    DecisionWindowRecord,
+    EvaluationWindowRecord,
+    WalkForwardDecisionResult,
+    WalkForwardEvaluationResult,
+)
 
 __all__ = [
     "WALKFORWARD_EVALUATION_SCHEMA_VERSION",
@@ -49,7 +59,7 @@ WALKFORWARD_EVALUATION_SCHEMA_VERSION = "1.0"
 _DECISION_COLUMN = "Decision"
 
 
-def _compute_report_hash(decision_report_result: Mapping[str, Any]) -> Optional[str]:
+def _compute_report_hash(decision_report_result: DecisionReportResult) -> Optional[str]:
     """Decision Report結果からSHA256ハッシュを算出する（report_history.pyと同じ方式）。
 
     Args:
@@ -67,9 +77,9 @@ def _compute_report_hash(decision_report_result: Mapping[str, Any]) -> Optional[
 
 
 def _evaluate_window(
-    decision_window: Mapping[str, Any],
+    decision_window: DecisionWindowRecord,
     run_id: Optional[str],
-) -> dict[str, Any]:
+) -> EvaluationWindowRecord:
     """1つのValidationウィンドウについて、Decision Validation / Decision Reportを適用する。
 
     Args:
@@ -79,7 +89,7 @@ def _evaluate_window(
 
     Returns:
         decision_validation_result・decision_report_result・report_hash・
-        errorを持つdict。
+        errorを持つEvaluationWindowRecord。
     """
     base = {
         "validation_period_id": decision_window.get("validation_period_id"),
@@ -146,9 +156,9 @@ def _evaluate_window(
 
 
 def run_walkforward_evaluation(
-    walkforward_decision_result: Mapping[str, Any],
+    walkforward_decision_result: WalkForwardDecisionResult,
     run_id: Optional[str] = None,
-) -> dict[str, Any]:
+) -> WalkForwardEvaluationResult:
     """walkforward_decision.py の結果へDecision Validation / Decision Reportを適用し、
     Validation期間ごとの投資判断の再現性を自動的に評価・レポート化する。
 
@@ -158,11 +168,9 @@ def run_walkforward_evaluation(
         run_id: 実行全体を一意に識別する予約フィールド（現時点では未指定でもよい）。
 
     Returns:
-        walkforward_evaluation_schema_version・run_id・code・strategy_name・
-        period・total_windows・windows（各windowはdecision_validation_result・
-        decision_report_result・report_hash等を持つ）を持つJSON互換dict。
-        1ウィンドウでエラーが発生しても、そのウィンドウのみerrorに記録し、
-        他のウィンドウの処理は継続する。
+        WalkForwardEvaluationResult（backtest.types参照）。1ウィンドウで
+        エラーが発生しても、そのウィンドウのみerrorに記録し、他の
+        ウィンドウの処理は継続する。
     """
     windows_in = walkforward_decision_result.get("windows") or []
 
