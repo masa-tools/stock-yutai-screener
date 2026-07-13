@@ -21,6 +21,12 @@ walkforward.py → walkforward_decision.py → walkforward_evaluation.py を
     windows[].error として保持しているため、本モジュールで重複して
     集計・再記録はしない。
 
+    JSON構造の詳細は backtest.types（WalkForwardPipelineResult・
+    StageErrorEntry等）を参照。"windows"キーは正常時は
+    WalkForwardEvaluationResult相当、途中失敗時は{"windows": [...]}
+    という縮退構造になるため、単一の厳密な型ではなくMapping[str, Any]
+    として扱っている（backtest.types内のコメント参照）。
+
 Public API:
     run_walkforward_pipeline
 """
@@ -29,13 +35,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
-
-import pandas as pd
+from typing import Mapping, Optional
 
 from backtest.walkforward import run_walkforward_validation, WindowSplitter, StrategyFn
 from backtest.walkforward_decision import run_walkforward_decision_validation
 from backtest.walkforward_evaluation import run_walkforward_evaluation
+from backtest.types import StageErrorEntry, WalkForwardPipelineResult
 
 __all__ = [
     "WALKFORWARD_PIPELINE_VERSION",
@@ -62,8 +67,8 @@ def run_walkforward_pipeline(
     score_col: str = "total",
     components_col: str = "components",
     run_id: Optional[str] = None,
-    extensions: Optional[Mapping[str, Any]] = None,
-) -> dict[str, Any]:
+    extensions: Optional[Mapping[str, object]] = None,
+) -> WalkForwardPipelineResult:
     """Walk Forward検証パイプライン全体（Validation生成→Decision付与→
     Decision Validation/Report適用）をワンコールで実行する統合エントリ
     ポイント。
@@ -94,18 +99,16 @@ def run_walkforward_pipeline(
             そのまま格納する。
 
     Returns:
-        pipeline_version・run_id・strategy・code・period・generated_at・
-        windows（walkforward_evaluation.pyの戻り値）・errors・warnings
-        を持つJSON互換dict（"extensions"は指定時のみ含まれる）。
-        いずれかの段階で例外が発生した場合、その段階以降の呼び出しは
-        行わず、"errors" にエラー内容を記録する。個々のValidation
-        ウィンドウ単位のエラーは"windows"配下にそのまま残る。
+        WalkForwardPipelineResult（backtest.types参照）。いずれかの
+        段階で例外が発生した場合、その段階以降の呼び出しは行わず、
+        "errors" にエラー内容を記録する。個々のValidationウィンドウ
+        単位のエラーは"windows"配下にそのまま残る。
     """
     resolved_run_id = run_id if run_id is not None else str(uuid.uuid4())
     generated_at = datetime.now(timezone.utc).isoformat()
 
-    errors: list[dict[str, str]] = []
-    warnings: list[dict[str, str]] = []
+    errors: list[StageErrorEntry] = []
+    warnings: list[StageErrorEntry] = []
 
     try:
         walkforward_result = run_walkforward_validation(
@@ -164,13 +167,13 @@ def _build_result(
     code: str,
     period: str,
     generated_at: str,
-    windows: Mapping[str, Any],
-    errors: list[dict[str, str]],
-    warnings: list[dict[str, str]],
-    extensions: Optional[Mapping[str, Any]],
-) -> dict[str, Any]:
+    windows: Mapping[str, object],
+    errors: list[StageErrorEntry],
+    warnings: list[StageErrorEntry],
+    extensions: Optional[Mapping[str, object]],
+) -> WalkForwardPipelineResult:
     """パイプライン全体の戻り値dictを組み立てる共通ヘルパー。"""
-    result: dict[str, Any] = {
+    result: WalkForwardPipelineResult = {
         "pipeline_version": WALKFORWARD_PIPELINE_VERSION,
         "run_id": run_id,
         "strategy": strategy_name,
