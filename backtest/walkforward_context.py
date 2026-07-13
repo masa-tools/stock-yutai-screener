@@ -12,6 +12,9 @@ walkforward_benchmark.py・walkforward_summary.py）が既に返している
     data_availability・context_summary・navigation）を組み立てる。
     新しい判定基準・スコア・評価ロジックの追加は行わない。
 
+    JSON構造の詳細は backtest.types（ExecutionMetadata・
+    WalkForwardContextResult等）を参照。
+
 Public API:
     build_walkforward_context
 """
@@ -19,7 +22,19 @@ Public API:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
+from typing import Mapping, Optional
+
+from backtest.types import (
+    ContextSummary,
+    DataAvailability,
+    ExecutionMetadata,
+    ModuleVersions,
+    Navigation,
+    WalkForwardBenchmarkResult,
+    WalkForwardContextResult,
+    WalkForwardPipelineResult,
+    WalkForwardSummaryResult,
+)
 
 __all__ = [
     "CONTEXT_SCHEMA_VERSION",
@@ -35,7 +50,7 @@ _NAVIGATION_SECTIONS: tuple[str, ...] = (
 )
 
 
-def _first_present(*values: Any) -> Any:
+def _first_present(*values: object) -> object:
     """複数の候補値のうち、最初に None でない値を返す。"""
     for v in values:
         if v is not None:
@@ -43,7 +58,7 @@ def _first_present(*values: Any) -> Any:
     return None
 
 
-def _extract_pipeline_windows(pipeline_result: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _extract_pipeline_windows(pipeline_result: WalkForwardPipelineResult) -> list[dict[str, object]]:
     """pipeline_resultからWindowのリストを取り出す（存在確認・件数把握のためだけの読み取り）。"""
     layer = pipeline_result.get("windows")
     if isinstance(layer, dict):
@@ -55,10 +70,10 @@ def _extract_pipeline_windows(pipeline_result: Mapping[str, Any]) -> list[dict[s
 
 
 def _build_execution_metadata(
-    pipeline_result: Mapping[str, Any],
-    benchmark_result: Mapping[str, Any],
-    summary_result: Mapping[str, Any],
-) -> dict[str, Any]:
+    pipeline_result: WalkForwardPipelineResult,
+    benchmark_result: WalkForwardBenchmarkResult,
+    summary_result: WalkForwardSummaryResult,
+) -> ExecutionMetadata:
     """3つの戻り値から、実行全体を識別するメタ情報を組み立てる（値の転記のみ）。"""
     summary_metadata = summary_result.get("metadata") or {}
 
@@ -88,10 +103,10 @@ def _build_execution_metadata(
 
 
 def _build_module_versions(
-    pipeline_result: Mapping[str, Any],
-    benchmark_result: Mapping[str, Any],
-    summary_result: Mapping[str, Any],
-) -> dict[str, Optional[str]]:
+    pipeline_result: WalkForwardPipelineResult,
+    benchmark_result: WalkForwardBenchmarkResult,
+    summary_result: WalkForwardSummaryResult,
+) -> ModuleVersions:
     """各モジュールが自己申告しているschema_versionを転記するだけ。"""
     return {
         "pipeline": pipeline_result.get("pipeline_version"),
@@ -102,10 +117,10 @@ def _build_module_versions(
 
 
 def _build_data_availability(
-    pipeline_result: Mapping[str, Any],
-    benchmark_result: Mapping[str, Any],
-    summary_result: Mapping[str, Any],
-) -> dict[str, bool]:
+    pipeline_result: WalkForwardPipelineResult,
+    benchmark_result: WalkForwardBenchmarkResult,
+    summary_result: WalkForwardSummaryResult,
+) -> DataAvailability:
     """Pipeline/Benchmark/Summary/Window/Health/Trendが実際に存在するかをboolで返す
     （値の中身の良し悪しは判定しない）。
     """
@@ -125,11 +140,11 @@ def _build_data_availability(
 
 
 def _build_context_summary(
-    pipeline_result: Mapping[str, Any],
-    benchmark_result: Mapping[str, Any],
-    summary_result: Mapping[str, Any],
-    data_availability: Mapping[str, bool],
-) -> dict[str, Any]:
+    pipeline_result: WalkForwardPipelineResult,
+    benchmark_result: WalkForwardBenchmarkResult,
+    summary_result: WalkForwardSummaryResult,
+    data_availability: DataAvailability,
+) -> ContextSummary:
     """利用可能モジュール一覧・Window数・Benchmark数等、既存値の件数カウントのみを行う。"""
     available_modules = [
         name for name, available in (
@@ -153,22 +168,22 @@ def _build_context_summary(
     }
 
 
-def _build_navigation() -> dict[str, Any]:
+def _build_navigation() -> Navigation:
     """将来UIが参照するための固定セクション一覧を返す。"""
     return {"sections": list(_NAVIGATION_SECTIONS)}
 
 
 def build_walkforward_context(
-    pipeline_result: Mapping[str, Any],
-    benchmark_result: Mapping[str, Any],
-    summary_result: Mapping[str, Any],
-    context: Optional[Mapping[str, Any]] = None,
-    extensions: Optional[Mapping[str, Any]] = None,
-    ai_context: Optional[Mapping[str, Any]] = None,
-    fundamental_context: Optional[Mapping[str, Any]] = None,
-    dividend_context: Optional[Mapping[str, Any]] = None,
-    market_context: Optional[Mapping[str, Any]] = None,
-) -> dict[str, Any]:
+    pipeline_result: WalkForwardPipelineResult,
+    benchmark_result: WalkForwardBenchmarkResult,
+    summary_result: WalkForwardSummaryResult,
+    context: Optional[Mapping[str, object]] = None,
+    extensions: Optional[Mapping[str, object]] = None,
+    ai_context: Optional[Mapping[str, object]] = None,
+    fundamental_context: Optional[Mapping[str, object]] = None,
+    dividend_context: Optional[Mapping[str, object]] = None,
+    market_context: Optional[Mapping[str, object]] = None,
+) -> WalkForwardContextResult:
     """Walk Forwardパイプラインの各モジュールが返す結果を、1つの統合コンテキストへ束ねる。
 
     Args:
@@ -187,13 +202,11 @@ def build_walkforward_context(
         market_context: 将来の市場環境評価を見据えた予約引数。指定時のみ"market_context"キーへ格納する。
 
     Returns:
-        context_schema_version・execution_metadata・module_versions・
-        data_availability・context_summary・navigation・pipeline・
-        benchmark・summaryを持つJSON互換dict（予約フィールド系は指定時のみ含まれる）。
+        WalkForwardContextResult（backtest.types参照）。
     """
     data_availability = _build_data_availability(pipeline_result, benchmark_result, summary_result)
 
-    result: dict[str, Any] = {
+    result: WalkForwardContextResult = {
         "context_schema_version": CONTEXT_SCHEMA_VERSION,
         "execution_metadata": _build_execution_metadata(pipeline_result, benchmark_result, summary_result),
         "module_versions": _build_module_versions(pipeline_result, benchmark_result, summary_result),
