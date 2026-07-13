@@ -15,15 +15,28 @@ walkforward_evaluation.run_walkforward_evaluation() の各Windowに対して、
     benchmark.build_benchmark()が既に算出したimprovement_score・
     overallの単純な並べ替え・件数集計のみで構成する。
 
+    JSON構造の詳細は backtest.types（TransitionRecord・
+    WalkForwardBenchmarkResult等）を参照。
+
 Public API:
     run_walkforward_benchmark
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from typing import Mapping, Optional
 
 from backtest.benchmark import build_benchmark
+from backtest.types import (
+    BenchmarkSummary,
+    BenchmarkWindowRecord,
+    ComparisonMetadata,
+    EvaluationWindowRecord,
+    ImprovementRankEntry,
+    TransitionRecord,
+    WalkForwardBenchmarkResult,
+    WalkForwardEvaluationResult,
+)
 
 __all__ = [
     "BENCHMARK_SCHEMA_VERSION",
@@ -34,7 +47,7 @@ __all__ = [
 BENCHMARK_SCHEMA_VERSION = "1.0"
 
 
-def _sort_windows_by_index(windows: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+def _sort_windows_by_index(windows: list[EvaluationWindowRecord]) -> list[EvaluationWindowRecord]:
     """windowsをwindow_index昇順に並べ替える（window_indexが無い要素は末尾）。"""
     return sorted(
         windows,
@@ -43,9 +56,9 @@ def _sort_windows_by_index(windows: list[Mapping[str, Any]]) -> list[Mapping[str
 
 
 def _build_comparison_metadata(
-    before: Mapping[str, Any],
-    after: Mapping[str, Any],
-) -> dict[str, Any]:
+    before: EvaluationWindowRecord,
+    after: EvaluationWindowRecord,
+) -> ComparisonMetadata:
     """1つの遷移（before Window → after Window）の比較メタ情報を組み立てる。
 
     validation_period_id/run_id/strategy/codeはafter（比較先＝評価対象）
@@ -61,7 +74,7 @@ def _build_comparison_metadata(
     }
 
 
-def _build_transition(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, Any]:
+def _build_transition(before: EvaluationWindowRecord, after: EvaluationWindowRecord) -> TransitionRecord:
     """1つの隣接Window遷移について、Benchmark比較を実行する。
 
     before/afterいずれかにerrorがある、またはdecision_report_resultが
@@ -104,7 +117,7 @@ def _build_transition(before: Mapping[str, Any], after: Mapping[str, Any]) -> di
         }
 
 
-def _build_improvement_rank(transitions: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _build_improvement_rank(transitions: list[TransitionRecord]) -> list[ImprovementRankEntry]:
     """比較に成功した遷移を、benchmark.pyが算出したimprovement_score降順で並べる。"""
     successful = [
         t for t in transitions
@@ -128,7 +141,7 @@ def _build_improvement_rank(transitions: list[Mapping[str, Any]]) -> list[dict[s
     ]
 
 
-def _build_benchmark_summary(transitions: list[Mapping[str, Any]]) -> dict[str, int]:
+def _build_benchmark_summary(transitions: list[TransitionRecord]) -> BenchmarkSummary:
     """全遷移について、改善/悪化/横ばい件数と比較成功/失敗数を集計する
     （benchmark.pyが返す"overall"の件数カウントのみ。新しい判定基準は導入しない）。
     """
@@ -159,10 +172,10 @@ def _build_benchmark_summary(transitions: list[Mapping[str, Any]]) -> dict[str, 
 
 
 def run_walkforward_benchmark(
-    walkforward_evaluation_result: Mapping[str, Any],
-    context: Optional[Mapping[str, Any]] = None,
-    extensions: Optional[Mapping[str, Any]] = None,
-) -> dict[str, Any]:
+    walkforward_evaluation_result: WalkForwardEvaluationResult,
+    context: Optional[Mapping[str, object]] = None,
+    extensions: Optional[Mapping[str, object]] = None,
+) -> WalkForwardBenchmarkResult:
     """walkforward_evaluation.py の結果に対し、隣接するWindow同士の
     Benchmark比較結果を付与する。
 
@@ -175,24 +188,20 @@ def run_walkforward_benchmark(
             のみ戻り値の"extensions"キーへそのまま格納する。
 
     Returns:
-        benchmark_schema_version・run_id・code・strategy_name・period・
-        total_windows・total_transitions・windows（各windowに
-        benchmark_resultを付加したコピー）・transitions・
-        improvement_rank・best_transition・worst_transition・
-        benchmark_summaryを持つJSON互換dict。windowsが0〜1件の場合、
-        transitions・improvement_rankは空リストになる。
+        WalkForwardBenchmarkResult（backtest.types参照）。windowsが
+        0〜1件の場合、transitions・improvement_rankは空リストになる。
     """
-    raw_windows = walkforward_evaluation_result.get("windows") or []
+    raw_windows: list[EvaluationWindowRecord] = walkforward_evaluation_result.get("windows") or []
     sorted_windows = _sort_windows_by_index(raw_windows)
 
-    transitions: list[dict[str, Any]] = [
+    transitions: list[TransitionRecord] = [
         _build_transition(sorted_windows[i], sorted_windows[i + 1])
         for i in range(len(sorted_windows) - 1)
     ]
 
-    windows_out: list[dict[str, Any]] = []
+    windows_out: list[BenchmarkWindowRecord] = []
     for i, window in enumerate(sorted_windows):
-        window_copy = dict(window)
+        window_copy: BenchmarkWindowRecord = dict(window)  # type: ignore[assignment]
         window_copy["benchmark_result"] = (
             None if i == 0 else transitions[i - 1]["benchmark_result"]
         )
@@ -202,7 +211,7 @@ def run_walkforward_benchmark(
     best_transition = improvement_rank[0] if improvement_rank else None
     worst_transition = improvement_rank[-1] if improvement_rank else None
 
-    result: dict[str, Any] = {
+    result: WalkForwardBenchmarkResult = {
         "benchmark_schema_version": BENCHMARK_SCHEMA_VERSION,
         "run_id": walkforward_evaluation_result.get("run_id"),
         "code": walkforward_evaluation_result.get("code"),
