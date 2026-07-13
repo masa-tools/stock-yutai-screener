@@ -208,7 +208,6 @@ def run_walkforward_runner(
     resolved_run_id = run_id if run_id is not None else str(uuid.uuid4())
     started_at_dt = datetime.now(timezone.utc)
     started_at = started_at_dt.isoformat()
-    pipeline_start = time.monotonic()
 
     stage_status: dict[str, str] = {name: "SKIPPED" for name in _STAGE_NAMES}
     stage_elapsed: dict[str, float] = {name: 0.0 for name in _STAGE_NAMES}
