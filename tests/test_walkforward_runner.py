@@ -17,6 +17,13 @@ backtest.walkforward_runner.run_walkforward_runner() の自動テスト。
   本テストの対象外とする。
 
   本番コード（backtest/ 配下の実装ファイル）は一切変更していない。
+
+【今回の修正について】
+  Dry Runテストが参照していた result["dry_run"] は、実際の
+  run_walkforward_runner() の戻り値には存在しないキーであることが
+  実ファイル監査で判明したため、実在するキー（stage_status["benchmark"]
+  等）を用いた検証へ差し替えた。Runner本体・他のテスト項目は変更して
+  いない。
 """
 
 from __future__ import annotations
@@ -167,8 +174,15 @@ def test_success_status_is_success(mock_all_success):
 # ② Dry Run
 # ════════════════════════════════════════════════
 def test_dry_run_skips_benchmark_summary_context(monkeypatch):
-    """dry_run=True の場合、Benchmark/Summary/ContextはSKIPPEDとなり、
+    """
+    dry_run=True の場合、Benchmark/Summary/ContextはSKIPPEDとなり、
     それらの生成関数（run_walkforward_benchmark等）は一切呼ばれない。
+
+    【修正メモ】run_walkforward_runner()の戻り値には"dry_run"キーは
+    存在しないため（実ファイル監査で判明）、代わりに実在する
+    stage_status（"pipeline"/"benchmark"/"summary"/"context"の各値）と
+    pipeline/benchmark/summary/contextの値（None/非None）を用いて
+    Dry Runの効果を検証する。
     """
     monkeypatch.setattr(wf_runner, "run_walkforward_pipeline",
                          lambda *args, **kwargs: _pipeline_result_ok())
@@ -182,10 +196,12 @@ def test_dry_run_skips_benchmark_summary_context(monkeypatch):
 
     result = _run(dry_run=True)
 
-    assert result["dry_run"] is True
+    assert result["status"] == "SUCCESS"
+    assert result["stage_status"]["pipeline"] == "SUCCESS"
     assert result["stage_status"]["benchmark"] == "SKIPPED"
     assert result["stage_status"]["summary"] == "SKIPPED"
     assert result["stage_status"]["context"] == "SKIPPED"
+    assert result["pipeline"] is not None
     assert result["benchmark"] is None
     assert result["summary"] is None
     assert result["context"] is None
