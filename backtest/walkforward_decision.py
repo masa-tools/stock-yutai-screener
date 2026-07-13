@@ -23,6 +23,9 @@ walkforward.py が生成したValidation期間の結果へ、既存のDecision E
     で構成する。1つのValidation期間の処理で例外が発生しても、他の
     ウィンドウの処理は継続する。
 
+    JSON構造の詳細は backtest.types（DecisionWindowRecord・
+    WalkForwardDecisionResult等）を参照。
+
 Public API:
     run_walkforward_decision_validation
 """
@@ -30,11 +33,18 @@ Public API:
 from __future__ import annotations
 
 import math
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
 from backtest.decision_pipeline import attach_decision_columns
+from backtest.types import (
+    DecisionRecord,
+    DecisionWindowRecord,
+    WalkForwardDecisionResult,
+    WalkForwardValidationResult,
+    WindowRecord,
+)
 
 __all__ = [
     "WALKFORWARD_DECISION_SCHEMA_VERSION",
@@ -73,17 +83,17 @@ def _to_json_safe(value: Any) -> Any:
         return str(value)
 
 
-def _row_to_record(row: pd.Series) -> dict[str, Any]:
+def _row_to_record(row: pd.Series) -> DecisionRecord:
     """DataFrameの1行をJSON互換dictへ変換する。"""
     return {col: _to_json_safe(row[col]) for col in row.index}
 
 
 def _apply_decision_to_window(
-    window: Mapping[str, Any],
+    window: WindowRecord,
     run_id: Optional[str],
     score_col: str,
     components_col: str,
-) -> dict[str, Any]:
+) -> DecisionWindowRecord:
     """1つのValidationウィンドウについて、Decision Engineを適用する。
 
     Args:
@@ -95,7 +105,7 @@ def _apply_decision_to_window(
 
     Returns:
         train/validation境界情報・decision_count・decision_records・
-        errorを持つdict。
+        errorを持つDecisionWindowRecord。
     """
     base = {
         "validation_period_id": window.get("validation_period_id"),
@@ -140,11 +150,11 @@ def _apply_decision_to_window(
 
 
 def run_walkforward_decision_validation(
-    walkforward_result: Mapping[str, Any],
+    walkforward_result: WalkForwardValidationResult,
     run_id: Optional[str] = None,
     score_col: str = "total",
     components_col: str = "components",
-) -> dict[str, Any]:
+) -> WalkForwardDecisionResult:
     """walkforward.py の結果へDecision Engineを適用し、期間ごとの投資判断の
     再現性を検証するためのデータ基盤を構築する。
 
@@ -155,10 +165,9 @@ def run_walkforward_decision_validation(
         components_col: attach_decision_columns() へ渡すcomponents列名。
 
     Returns:
-        walkforward_decision_schema_version・run_id・code・strategy_name・
-        period・total_windows・windows（各windowはdecision_records等を持つ）
-        を持つJSON互換dict。1ウィンドウでエラーが発生しても、そのウィンドウ
-        のみerrorに記録し、他のウィンドウの処理は継続する。
+        WalkForwardDecisionResult（backtest.types参照）。1ウィンドウで
+        エラーが発生しても、そのウィンドウのみerrorに記録し、他の
+        ウィンドウの処理は継続する。
     """
     windows_in = walkforward_result.get("windows") or []
 
