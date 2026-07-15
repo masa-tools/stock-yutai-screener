@@ -116,6 +116,9 @@ from backtest.report_history import build_history_entry
 from backtest.benchmark import build_benchmark
 from backtest import evaluation
 from backtest.walkforward_runner import run_walkforward_runner
+from backtest.walkforward_strategy_compare import run_walkforward_strategy_compare
+from backtest.walkforward_ranking import build_walkforward_ranking
+from backtest.walkforward_export import build_walkforward_csv_exports
 
 
 # ════════════════════════════════════════════════
@@ -186,6 +189,10 @@ _HISTORY_MAX_ENTRIES = 20
 # 辞書キャッシュとする。選択条件を切り替えても、過去に実行済みの組み合わせは
 # 再実行不要（yfinance呼び出し・Decision Engineのフル実行を避けるため）。
 _SS_KEY_WF_CACHE = "walkforward_runner_cache"
+# Strategy Compare（複数戦略比較）の実行結果セッションキー。
+# キーは (code, period_code, tuple(sorted(選択戦略)), dry_run)。
+# _SS_KEY_WF_CACHEと同じ設計思想（辞書キャッシュ）を踏襲。
+_SS_KEY_WF_COMPARE_CACHE = "walkforward_strategy_compare_cache"
 
 # ── Decision表示用の★マッピング（表示専用。判断ロジックではない） ──
 # decision.build_decision() が返す "decision" 文字列を★の数に変換するだけの
@@ -1532,9 +1539,11 @@ def render_walkforward_validation_section(meta: dict) -> None:
             f"Dry Run={'ON' if wf_dry_run else 'OFF'} の組み合わせは"
             "まだ実行されていません。「▶ Walk Forward 実行」ボタンを押してください。"
         )
-        return
+    else:
+        render_walkforward_runner_result(result)
 
-    render_walkforward_runner_result(result)
+    st.divider()
+    render_walkforward_strategy_compare_section(wf_code, wf_period_label, wf_period_code, wf_dry_run)
 
 
 def render_walkforward_runner_result(result: dict) -> None:
@@ -1608,6 +1617,12 @@ def render_walkforward_runner_result(result: dict) -> None:
     if benchmark:
         with st.expander("🆚 Benchmark"):
             st.json(benchmark)
+
+    st.divider()
+    render_walkforward_window_charts(result.get("summary"))
+
+    st.divider()
+    render_walkforward_csv_export(result)
 
 
 def _format_stage_message(entry) -> str:
@@ -1766,3 +1781,199 @@ def _fmt(value, suffix: str = "") -> str:
         return f"{f:.2f}{suffix}"
     except (TypeError, ValueError):
         return "―"
+
+
+# ════════════════════════════════════════════════
+# Window別可視化（②。既存data_metricsをそのまま描画するだけ）
+# ════════════════════════════════════════════════
+def render_walkforward_window_charts(summary_result: dict | None) -> None:
+    """
+    summary_result["window_metrics"]（既存データ）を折れ線・棒グラフで可視化する。
+
+    新しい計算は一切行わず、既存の集計値（walkforward_summary.pyが
+    既に算出済みの avg_return / win_rate / max_dd / avg_confidence /
+    decision_count）をそのままStreamlitのチャートへ渡すだけ。
+    """
+    st.markdown("###### 📈 Window別可視化")
+
+    if not summary_result:
+        st.caption("Summaryデータが無いため、Window別可視化は表示できません。")
+        return
+
+    window_metrics = summary_result.get("window_metrics") or []
+    if not window_metrics:
+        st.caption("Windowデータがありません。")
+        return
+
+    df = pd.DataFrame(window_metrics)
+    if "window_index" not in df.columns:
+        st.caption("window_indexが見つからないため、Window別可視化を表示できません。")
+        return
+    df = df.set_index("window_index")
+
+    st.caption("推移グラフ（Window順）")
+    trend_cols = [c for c in ("avg_return", "win_rate", "max_dd", "avg_confidence") if c in df.columns]
+    if trend_cols:
+        st.line_chart(df[trend_cols])
+    else:
+        st.caption("推移グラフ用のデータがありません。")
+
+    st.caption("Window別 Decision件数")
+    if "decision_count" in df.columns:
+        st.bar_chart(df[["decision_count"]])
+    else:
+        st.caption("decision_countがありません。")
+
+    decision_distribution = summary_result.get("decision_distribution") or {}
+    if decision_distribution:
+        st.caption("Decisionラベル別 合計件数")
+        dist_df = pd.DataFrame(
+            [{"decision": label, "count": count} for label, count in decision_distribution.items()]
+        ).set_index("decision")
+        st.bar_chart(dist_df)
+
+
+# ════════════════════════════════════════════════
+# CSVエクスポート（③。walkforward_export.pyの薄いラッパー）
+# ════════════════════════════════════════════════
+def render_walkforward_csv_export(runner_result: dict | None) -> None:
+    """
+    walkforward_export.build_walkforward_csv_exports() の戻り値を
+    st.download_button でダウンロード可能にするだけの表示関数。
+    """
+    st.markdown("###### 📥 CSVエクスポート")
+
+    exports = build_walkforward_csv_exports(runner_result)
+    if not exports:
+        st.caption("エクスポート可能なデータがありません。")
+        return
+
+    cols = st.columns(len(exports))
+    for col, (filename, csv_text) in zip(cols, exports.items()):
+        with col:
+            st.download_button(
+                label=f"⬇ {filename}",
+                data=csv_text,
+                file_name=filename,
+                mime="text/csv",
+                key=f"wf_csv_download_{filename}",
+            )
+
+
+# ════════════════════════════════════════════════
+# Strategy Compare（①）＋ ランキング（④）
+# ════════════════════════════════════════════════
+def render_walkforward_strategy_compare_section(
+    wf_code: str, wf_period_label: str, wf_period_code: str, wf_dry_run: bool
+) -> None:
+    """
+    複数戦略のWalk Forward結果を横並びで比較するセクション。
+
+    walkforward_strategy_compare.run_walkforward_strategy_compare()
+    （Runnerを複数回呼ぶだけの薄いラッパー）と、
+    walkforward_ranking.build_walkforward_ranking()
+    （既存のhealth_check/stability_score/improvement_scoreを並べ替える
+    だけ）を呼び出し、その戻り値をそのまま表示する。新しい計算・
+    判定ロジックはこのファイル内にも一切持たない。
+
+    銘柄・期間・Dry Runは既存のWalk Forward Validationセクションの
+    選択値をそのまま引き継ぎ、比較対象の戦略のみここで複数選択する。
+    """
+    st.markdown("### 🆚 Strategy Compare（戦略比較）")
+    st.caption(
+        f"対象: {wf_code} {STOCK_CANDIDATES.get(wf_code, '')} / {wf_period_label} / "
+        f"Dry Run={'ON' if wf_dry_run else 'OFF'}"
+    )
+
+    selected_strategies = st.multiselect(
+        "比較する戦略",
+        options=list(STRATEGY_REGISTRY.keys()),
+        default=list(STRATEGY_REGISTRY.keys()),
+        format_func=lambda k: STRATEGY_REGISTRY[k]["label"],
+        key="wf_compare_strategy_select",
+    )
+
+    compare_key = (wf_code, wf_period_code, tuple(sorted(selected_strategies)), wf_dry_run)
+    run_clicked = st.button("▶ Strategy Compare 実行", key="wf_compare_run_button")
+
+    if run_clicked:
+        if not selected_strategies:
+            st.warning("比較する戦略を1つ以上選択してください。")
+        else:
+            strategies = {name: STRATEGY_REGISTRY[name]["compute_fn"] for name in selected_strategies}
+            with st.spinner("Strategy Compareを実行中..."):
+                try:
+                    compare_result = run_walkforward_strategy_compare(
+                        code=wf_code, strategies=strategies, period=wf_period_code, dry_run=wf_dry_run,
+                    )
+                    compare_cache = st.session_state.setdefault(_SS_KEY_WF_COMPARE_CACHE, {})
+                    compare_cache[compare_key] = compare_result
+                except Exception:
+                    st.error("❌ Strategy Compare実行中にエラーが発生しました。")
+                    st.code(traceback.format_exc(), language="text")
+                    return
+
+    compare_cache = st.session_state.get(_SS_KEY_WF_COMPARE_CACHE, {})
+    compare_result = compare_cache.get(compare_key)
+    if compare_result is None:
+        st.info("「▶ Strategy Compare 実行」ボタンを押すと、選択した戦略のWalk Forwardをまとめて実行します。")
+        return
+
+    for e in compare_result.get("errors") or []:
+        st.error(f"[{e.get('strategy')}] {e.get('message')}")
+
+    strategies_result = compare_result.get("strategies") or {}
+    if not strategies_result:
+        st.info("比較結果がありません。")
+        return
+
+    st.markdown("#### 📊 戦略別サマリー")
+    rows = []
+    for name, runner_result in strategies_result.items():
+        summary = runner_result.get("summary") or {}
+        health_check = summary.get("health_check") or {}
+        stability = summary.get("stability_score") or {}
+        rows.append({
+            "戦略": STRATEGY_REGISTRY.get(name, {}).get("label", name),
+            "Status": runner_result.get("status"),
+            "Health": health_check.get("level"),
+            "Health Score": health_check.get("score"),
+            "Stability Score": stability.get("score"),
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    st.markdown("#### 🏆 ランキング")
+    ranking = build_walkforward_ranking(strategies_result)
+    render_walkforward_ranking_tables(ranking)
+
+    with st.expander("戦略別 詳細結果"):
+        for name, runner_result in strategies_result.items():
+            st.markdown(f"##### {STRATEGY_REGISTRY.get(name, {}).get('label', name)}")
+            render_walkforward_runner_result(runner_result)
+            st.divider()
+
+
+def render_walkforward_ranking_tables(ranking: dict) -> None:
+    """
+    walkforward_ranking.build_walkforward_ranking() の戻り値をそのまま
+    表形式で表示するだけの関数。並べ替え・重み付け等の計算は行わない。
+    """
+    def _to_df(rows: list[dict], value_col: str, label: str) -> pd.DataFrame:
+        return pd.DataFrame([
+            {"戦略": STRATEGY_REGISTRY.get(r.get("name"), {}).get("label", r.get("name")), label: r.get(value_col)}
+            for r in rows
+        ])
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.caption("Health Checkスコア順")
+        st.dataframe(_to_df(ranking.get("ranking_by_health_check", []), "health_check_score", "Score"),
+                     use_container_width=True, hide_index=True)
+    with col2:
+        st.caption("Stability Score順")
+        st.dataframe(_to_df(ranking.get("ranking_by_stability", []), "stability_score", "Score"),
+                     use_container_width=True, hide_index=True)
+    with col3:
+        st.caption("Improvement Score順")
+        st.dataframe(_to_df(ranking.get("ranking_by_improvement", []), "improvement_score", "Score"),
+                     use_container_width=True, hide_index=True)
