@@ -178,7 +178,12 @@ _HISTORY_MAX_ENTRIES = 20
 
 # ── Walk Forward Validation の実行結果セッションキー ────────
 # 値は walkforward_runner.run_walkforward_runner() の戻り値そのもの。
-_SS_KEY_WF_RESULT = "walkforward_runner_result"
+# Walk Forward Validation の実行結果セッションキー。
+# 既存の _SS_KEY_CACHE（(code, period_code, strategy_key)をキーとした辞書キャッシュ）
+# と同じ設計思想で、(code, period_code, strategy_key, dry_run) をキーとした
+# 辞書キャッシュとする。選択条件を切り替えても、過去に実行済みの組み合わせは
+# 再実行不要（yfinance呼び出し・Decision Engineのフル実行を避けるため）。
+_SS_KEY_WF_CACHE = "walkforward_runner_cache"
 
 # ── Decision表示用の★マッピング（表示専用。判断ロジックではない） ──
 # decision.build_decision() が返す "decision" 文字列を★の数に変換するだけの
@@ -1426,11 +1431,13 @@ def render_walkforward_validation_section(meta: dict) -> None:
 
     「▶ Walk Forward 実行」ボタンが押された時のみ
     walkforward_runner.run_walkforward_runner()（無変更）を1回呼び出し、
-    結果をst.session_state[_SS_KEY_WF_RESULT]へ保存する。それ以外の
-    Streamlit再描画（他セクションの操作等）では再実行せず、
-    session_state上の結果をそのまま表示するだけに徹する。
-    Decision/Rating/Confidence/Benchmark/Summaryの計算はここでは
-    一切行わない（run_walkforward_runner()へ完全委譲）。
+    結果を st.session_state[_SS_KEY_WF_CACHE] へ (code, period_code,
+    strategy_key, dry_run) をキーとして保存する。既存の通常バックテスト
+    タブ（_SS_KEY_CACHE）と同じ設計思想であり、選択中の組み合わせを
+    切り替えても、過去に実行済みの組み合わせであれば再実行せず
+    キャッシュから即座に再表示する。Decision/Rating/Confidence/
+    Benchmark/Summaryの再計算は一切行わない（walkforward_runner.pyへ
+    完全委譲）。
 
     Args:
         meta: 現在表示中のバックテスト条件のメタ情報
@@ -1453,9 +1460,12 @@ def render_walkforward_validation_section(meta: dict) -> None:
         meta.get("period_label") if meta.get("period_label") in PERIOD_OPTIONS else DEFAULT_PERIOD_LABEL
     )
 
-    wf_strategy_options = ["v9", "v8"]
+    # STRATEGY_REGISTRYを唯一の情報源とする。
+    # v10等を STRATEGY_REGISTRY へ追加するだけで、この選択肢へも自動的に反映される
+    # （Walk Forward側にハードコードされた戦略リストは持たない）。
+    wf_strategy_options = list(STRATEGY_REGISTRY.keys())
     default_strategy_key = (
-        meta.get("strategy_key") if meta.get("strategy_key") in wf_strategy_options else "v9"
+        meta.get("strategy_key") if meta.get("strategy_key") in wf_strategy_options else DEFAULT_STRATEGY_KEY
     )
 
     col1, col2, col3, col4 = st.columns(4)
@@ -1488,10 +1498,12 @@ def render_walkforward_validation_section(meta: dict) -> None:
     if wf_dry_run:
         st.info("ℹ️ Dry Run時はBenchmarkは実行されません。")
 
+    wf_period_code = PERIOD_OPTIONS[wf_period_label]
+    wf_cache_key = (wf_code, wf_period_code, wf_strategy_key, wf_dry_run)
+
     run_clicked = st.button("▶ Walk Forward 実行", key="wf_run_button")
 
     if run_clicked:
-        wf_period_code = PERIOD_OPTIONS[wf_period_label]
         compute_fn = STRATEGY_REGISTRY[wf_strategy_key]["compute_fn"]
         with st.spinner("Walk Forward Validationを実行中..."):
             try:
@@ -1502,15 +1514,22 @@ def render_walkforward_validation_section(meta: dict) -> None:
                     period=wf_period_code,
                     dry_run=wf_dry_run,
                 )
-                st.session_state[_SS_KEY_WF_RESULT] = result
+                wf_cache = st.session_state.setdefault(_SS_KEY_WF_CACHE, {})
+                wf_cache[wf_cache_key] = result
             except Exception:
                 st.error("❌ Walk Forward Validation実行中にエラーが発生しました。")
                 st.code(traceback.format_exc(), language="text")
                 return
 
-    result = st.session_state.get(_SS_KEY_WF_RESULT)
+    wf_cache = st.session_state.get(_SS_KEY_WF_CACHE, {})
+    result = wf_cache.get(wf_cache_key)
     if result is None:
-        st.info("「▶ Walk Forward 実行」ボタンを押すと検証を開始します。")
+        st.info(
+            f"「{wf_code} {STOCK_CANDIDATES[wf_code]}」/「{wf_period_label}」/"
+            f"「{STRATEGY_REGISTRY[wf_strategy_key]['label']}」/"
+            f"Dry Run={'ON' if wf_dry_run else 'OFF'} の組み合わせは"
+            "まだ実行されていません。「▶ Walk Forward 実行」ボタンを押してください。"
+        )
         return
 
     render_walkforward_runner_result(result)
