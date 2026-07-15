@@ -50,6 +50,12 @@ __all__ = [
 #: このパイプライン全体の戻り値スキーマのバージョン。
 WALKFORWARD_PIPELINE_VERSION = "1.0"
 
+#: 他モジュール（walkforward_schema_version等）との命名規則統一のために追加した
+#: エイリアスキー名。WALKFORWARD_PIPELINE_VERSIONと常に同じ値を持つ。
+#: 【重要】既存の"pipeline_version"キーは後方互換のため削除・変更しない。
+#: 新規の消費者はこちらのキー名を参照することを推奨する。
+PIPELINE_SCHEMA_VERSION_KEY = "pipeline_schema_version"
+
 #: パイプラインの各ステージを識別する名称
 #: （errors/warnings の "stage" フィールドで使用する）。
 _STAGE_WALKFORWARD = "walkforward"
@@ -175,6 +181,7 @@ def _build_result(
     """パイプライン全体の戻り値dictを組み立てる共通ヘルパー。"""
     result: WalkForwardPipelineResult = {
         "pipeline_version": WALKFORWARD_PIPELINE_VERSION,
+        "pipeline_schema_version": WALKFORWARD_PIPELINE_VERSION,
         "run_id": run_id,
         "strategy": strategy_name,
         "code": code,
