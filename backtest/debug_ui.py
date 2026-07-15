@@ -68,10 +68,12 @@ Step1バックテストの結果をブラウザ（Streamlit）から確認する
   同一(銘柄,期間,ロジック)の組み合わせにつき1件のみ記録する
   （Streamlitの再描画のたびに重複登録しない）。
 
-  Walk Forward Validation（walkforward_runner_result）も同様に、
+  Walk Forward Validation（walkforward_runner_cache）も同様に、
   「▶ Walk Forward 実行」ボタンが押された時のみrun_walkforward_runner()
   を呼び出し、結果をsession_stateへ保存する。それ以外の再描画では
-  session_state上の結果をそのまま表示するだけで、再実行はしない。
+  session_state上の結果をそのまま表示するだけで、再実行はしない
+  （選択条件ごとにキャッシュされ、過去に実行済みの組み合わせは
+  再実行不要）。
 
 【削除容易性について】
   このファイル1つに開発用UIロジックを集約している。
