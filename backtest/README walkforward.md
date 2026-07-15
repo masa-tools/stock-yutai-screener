@@ -82,6 +82,8 @@ flowchart TD
 ### Pipeline（`WalkForwardPipelineResult`）
 `pipeline_version` / `run_id` / `strategy` / `code` / `period` / `generated_at` / `windows`（正常時は`WalkForwardEvaluationResult`相当のdict）/ `errors` / `warnings` / `extensions`（指定時のみ）
 
+> 補足: 他モジュールとの命名規則統一のため、`pipeline_version`と同じ値を持つ`pipeline_schema_version`キーが追加されています（後方互換のため`pipeline_version`は維持されたままです。新規実装では`pipeline_schema_version`の利用を推奨します）。
+
 ### Benchmark（`WalkForwardBenchmarkResult`）
 `benchmark_schema_version` / `run_id` / `code` / `strategy_name` / `period` / `total_windows` / `total_transitions` / `windows`（各Windowに`benchmark_result`が付与される）/ `transitions` / `improvement_rank` / `best_transition` / `worst_transition` / `benchmark_summary` / `context` / `extensions`（いずれも指定時のみ）
 
