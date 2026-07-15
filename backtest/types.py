@@ -273,6 +273,9 @@ class WalkForwardEvaluationResult(TypedDict):
 # ════════════════════════════════════════════════
 class _WalkForwardPipelineResultRequired(TypedDict):
     pipeline_version: str
+    # 既存の "pipeline_version" と同じ値を持つ、命名規則統一のためのエイリアスキー。
+    # 他モジュール（*_schema_version）との一貫性のために追加。
+    pipeline_schema_version: str
     run_id: str
     strategy: str
     code: str
