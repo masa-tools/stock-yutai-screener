@@ -17,6 +17,7 @@ from backtest.walkforward_storage import (
     initialize_database,
     save_runner_result,
     load_runner_result,
+    list_runner_results,
 )
 
 
@@ -148,3 +149,59 @@ def test_duplicate_run_id_raises_integrity_error(db_path):
 
     with pytest.raises(sqlite3.IntegrityError):
         save_runner_result(result, db_path=db_path)
+
+
+# ════════════════════════════════════════════════
+# list_runner_results() のテスト（Phase3）
+# ════════════════════════════════════════════════
+def test_list_runner_results_empty(db_path):
+    """保存済みレコードが無い場合、空リストが返る。"""
+    initialize_database(db_path)
+    assert list_runner_results(db_path=db_path) == []
+
+
+def test_list_runner_results_returns_multiple_entries(db_path):
+    """複数件保存した場合、すべてのrun_idが一覧へ含まれる。"""
+    initialize_database(db_path)
+    save_runner_result(_dummy_runner_result("run-1"), db_path=db_path)
+    save_runner_result(_dummy_runner_result("run-2"), db_path=db_path)
+
+    rows = list_runner_results(db_path=db_path)
+    assert {r["run_id"] for r in rows} == {"run-1", "run-2"}
+
+
+def test_list_runner_results_ordered_by_created_at_desc(db_path):
+    """created_at降順（後から保存したものが先頭）で返る。"""
+    initialize_database(db_path)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO walkforward_runs "
+            "(run_id, code, strategy_name, period, status, raw_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("run-old", "7203", "v9", "1y", "SUCCESS", "{}", "2026-01-01T00:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO walkforward_runs "
+            "(run_id, code, strategy_name, period, status, raw_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("run-new", "7203", "v9", "1y", "SUCCESS", "{}", "2026-01-02T00:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = list_runner_results(db_path=db_path)
+    assert [r["run_id"] for r in rows] == ["run-new", "run-old"]
+
+
+def test_list_runner_results_does_not_include_raw_json(db_path):
+    """一覧取得の戻り値にraw_jsonキーが含まれない。"""
+    initialize_database(db_path)
+    save_runner_result(_dummy_runner_result(), db_path=db_path)
+
+    rows = list_runner_results(db_path=db_path)
+    assert "raw_json" not in rows[0]
+    assert set(rows[0].keys()) == {
+        "run_id", "code", "strategy_name", "period", "status", "started_at", "created_at",
+    }
