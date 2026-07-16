@@ -119,6 +119,7 @@ from backtest.walkforward_runner import run_walkforward_runner
 from backtest.walkforward_strategy_compare import run_walkforward_strategy_compare
 from backtest.walkforward_ranking import build_walkforward_ranking, extract_ranking_metrics
 from backtest.walkforward_export import build_walkforward_csv_exports
+from backtest.walkforward_storage import save_runner_result, list_runner_results, load_runner_result
 
 
 # ════════════════════════════════════════════════
@@ -189,6 +190,12 @@ _HISTORY_MAX_ENTRIES = 20
 # 辞書キャッシュとする。選択条件を切り替えても、過去に実行済みの組み合わせは
 # 再実行不要（yfinance呼び出し・Decision Engineのフル実行を避けるため）。
 _SS_KEY_WF_CACHE = "walkforward_runner_cache"
+# SQLiteから読み込んだ履歴1件分の表示専用スロット（Phase3）。
+# 既存の _SS_KEY_WF_CACHE（実行条件をキーとした辞書キャッシュ）とは
+# 独立させ、履歴からの閲覧が現在の実行条件キャッシュを上書きしない
+# ようにする。新しいキャッシュ機構ではなく、既存のst.session_stateを
+# そのまま1スロット分利用するだけ。
+_SS_KEY_WF_HISTORY_VIEW = "walkforward_history_view_result"
 # Strategy Compare（複数戦略比較）の実行結果セッションキー。
 # キーは (code, period_code, tuple(sorted(選択戦略)), dry_run)。
 # _SS_KEY_WF_CACHEと同じ設計思想（辞書キャッシュ）を踏襲。
@@ -1292,6 +1299,9 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
         st.divider()
         render_walkforward_validation_section(meta)
 
+        st.divider()
+        render_walkforward_history_section()
+
 
 def _render_eval_rating(view: dict | None) -> None:
     """① Rating Summary: evaluation.render_rating_view()の戻り値を表示する。"""
@@ -1979,4 +1989,63 @@ def render_walkforward_ranking_tables(ranking: dict) -> None:
     with col3:
         st.caption("Improvement Score順")
         st.dataframe(_to_df(ranking.get("ranking_by_improvement", []), "improvement_score", "Score"),
+
+                     
+# ════════════════════════════════════════════════
+# 保存済み履歴（Phase3。読み取り専用。walkforward_storage.pyへ完全委譲）
+# ════════════════════════════════════════════════
+def render_walkforward_history_section() -> None:
+    """
+    SQLiteへ保存済みのWalk Forward結果を一覧表示する（読み取り専用）。
+
+    walkforward_storage.list_runner_results()（無変更）の戻り値を
+    そのまま表として表示するだけで、新しい集計・加工は行わない。
+    各行の「📂 読み込む」ボタンが押された時のみ
+    walkforward_storage.load_runner_result(run_id) を呼び、取得した
+    RunnerResultを render_walkforward_runner_result() へそのまま渡す
+    （表示ロジックは完全再利用し、新しい表示コードは書かない）。
+
+    読み込んだ結果は _SS_KEY_WF_HISTORY_VIEW という専用スロットへ
+    保存する。既存の _SS_KEY_WF_CACHE（実行条件ごとのキャッシュ）とは
+    独立しており、履歴からの閲覧が現在の実行結果キャッシュを
+    上書きすることはない。
+    """
+    st.markdown("### 📚 保存済み履歴")
+
+    try:
+        history_rows = list_runner_results()
+    except Exception:
+        st.error("❌ 履歴の取得中にエラーが発生しました。")
+        st.code(traceback.format_exc(), language="text")
+        return
+
+    if not history_rows:
+        st.caption("保存済みの履歴はまだありません。")
+        return
+
+    header_cols = st.columns([2, 1, 1, 1, 1, 1])
+    for col, label in zip(header_cols, ["保存日時", "銘柄", "戦略", "期間", "Status", ""]):
+        col.markdown(f"**{label}**")
+
+    for row in history_rows:
+        cols = st.columns([2, 1, 1, 1, 1, 1])
+        cols[0].caption(row.get("created_at") or "―")
+        cols[1].caption(row.get("code") or "―")
+        cols[2].caption(row.get("strategy_name") or "―")
+        cols[3].caption(row.get("period") or "―")
+        cols[4].caption(row.get("status") or "―")
+        with cols[5]:
+            if st.button("📂 読み込む", key=f"wf_history_load_{row.get('run_id')}"):
+                try:
+                    loaded_result = load_runner_result(row.get("run_id"))
+                    st.session_state[_SS_KEY_WF_HISTORY_VIEW] = loaded_result
+                except Exception:
+                    st.error("❌ 履歴の読込中にエラーが発生しました。")
+                    st.code(traceback.format_exc(), language="text")
+
+    history_view_result = st.session_state.get(_SS_KEY_WF_HISTORY_VIEW)
+    if history_view_result is not None:
+        st.divider()
+        st.markdown("#### 📂 読み込んだ履歴の内容")
+        render_walkforward_runner_result(history_view_result)
                      use_container_width=True, hide_index=True)
