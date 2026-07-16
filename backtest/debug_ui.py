@@ -117,7 +117,7 @@ from backtest.benchmark import build_benchmark
 from backtest import evaluation
 from backtest.walkforward_runner import run_walkforward_runner
 from backtest.walkforward_strategy_compare import run_walkforward_strategy_compare
-from backtest.walkforward_ranking import build_walkforward_ranking
+from backtest.walkforward_ranking import build_walkforward_ranking, extract_ranking_metrics
 from backtest.walkforward_export import build_walkforward_csv_exports
 
 
@@ -1927,23 +1927,26 @@ def render_walkforward_strategy_compare_section(
         st.info("比較結果がありません。")
         return
 
+    # 抽出処理の二重実装を避けるため、build_walkforward_ranking()を1回だけ
+    # 呼び出し、その"metrics"（walkforward_ranking.extract_ranking_metrics()
+    # が算出した値）を戦略別サマリー表・ランキング表の両方で共通利用する
+    # （RC監査 M-1対応）。
+    ranking = build_walkforward_ranking(strategies_result)
+
     st.markdown("#### 📊 戦略別サマリー")
     rows = []
     for name, runner_result in strategies_result.items():
-        summary = runner_result.get("summary") or {}
-        health_check = summary.get("health_check") or {}
-        stability = summary.get("stability_score") or {}
+        metrics = ranking["metrics"].get(name) or extract_ranking_metrics(runner_result)
         rows.append({
             "戦略": STRATEGY_REGISTRY.get(name, {}).get("label", name),
             "Status": runner_result.get("status"),
-            "Health": health_check.get("level"),
-            "Health Score": health_check.get("score"),
-            "Stability Score": stability.get("score"),
+            "Health": metrics.get("health_check_level"),
+            "Health Score": metrics.get("health_check_score"),
+            "Stability Score": metrics.get("stability_score"),
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.markdown("#### 🏆 ランキング")
-    ranking = build_walkforward_ranking(strategies_result)
     render_walkforward_ranking_tables(ranking)
 
     with st.expander("戦略別 詳細結果"):
