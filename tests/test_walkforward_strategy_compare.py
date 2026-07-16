@@ -60,6 +60,10 @@ def test_result_contains_one_entry_per_strategy(mock_runner_success):
     assert set(result["strategies"].keys()) == {"v8", "v9"}
     assert result["strategies"]["v8"]["status"] == "SUCCESS"
     assert result["errors"] == []
+    # H-1対応: Runnerファミリーと揃えたトップレベル構造の検証
+    assert result["status"] == "SUCCESS"
+    assert result["run_id"] is not None
+    assert result["warnings"] == []
 
 
 def test_extra_kwargs_are_forwarded_to_every_runner_call(mock_runner_success):
@@ -89,6 +93,9 @@ def test_one_strategy_failure_does_not_stop_others(monkeypatch):
     assert "v9" in result["strategies"]
     assert len(result["errors"]) == 1
     assert result["errors"][0]["strategy"] == "v8"
+    # H-1対応: 一部戦略が失敗した場合はPARTIAL_SUCCESSになる
+    # （新しい状態は作らず、既存3値のみを使用）
+    assert result["status"] == "PARTIAL_SUCCESS"
 
 
 def test_result_is_json_serializable(mock_runner_success):
@@ -100,5 +107,6 @@ def test_result_is_json_serializable(mock_runner_success):
 def test_required_keys_present(mock_runner_success):
     strategies = {"v8": _dummy_strategy_fn}
     result = wf_compare.run_walkforward_strategy_compare(code="7203", strategies=strategies, period="1y")
-    for key in ("strategy_compare_schema_version", "code", "period", "strategies", "errors"):
+    for key in ("strategy_compare_schema_version", "run_id", "status", "warnings",
+                "code", "period", "strategies", "errors"):
         assert key in result
