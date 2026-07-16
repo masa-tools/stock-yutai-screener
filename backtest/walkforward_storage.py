@@ -39,6 +39,7 @@ __all__ = [
     "initialize_database",
     "save_runner_result",
     "load_runner_result",
+    "list_runner_results",
 ]
 
 #: デフォルトのSQLiteデータベースファイルパス。
@@ -69,6 +70,12 @@ INSERT INTO walkforward_runs (
 """
 
 _SELECT_RAW_JSON_SQL = "SELECT raw_json FROM walkforward_runs WHERE run_id = ?"
+
+_SELECT_LIST_SQL = """
+SELECT run_id, code, strategy_name, period, status, started_at, created_at
+FROM walkforward_runs
+ORDER BY created_at DESC
+"""
 
 
 def initialize_database(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
@@ -184,3 +191,31 @@ def load_runner_result(
     if row is None:
         return None
     return json.loads(row[0])
+
+
+def list_runner_results(
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    """保存済みRunnerResultの一覧を、保存日時（created_at）降順で返す。
+
+    raw_jsonは含まない（一覧取得のペイロードを軽量に保つため）。
+    詳細を取得したい場合は、戻り値の"run_id"を load_runner_result() へ
+    渡すこと。新しい計算・整形は一切行わず、単純なSELECT結果を
+    そのまま返す。
+
+    Args:
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        [{"run_id", "code", "strategy_name", "period", "status",
+        "started_at", "created_at"}, ...] のリスト（created_at降順）。
+        保存済みレコードが無い場合は空リスト。
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(_SELECT_LIST_SQL).fetchall()
+    finally:
+        conn.close()
+
+    columns = ("run_id", "code", "strategy_name", "period", "status", "started_at", "created_at")
+    return [dict(zip(columns, row)) for row in rows]
