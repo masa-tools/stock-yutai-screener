@@ -41,6 +41,8 @@ __all__ = [
     "load_runner_result",
     "list_runner_results",
     "search_runner_results",
+    "save_compare_result",
+    "load_compare_result",
 ]
 
 #: デフォルトのSQLiteデータベースファイルパス。
@@ -54,6 +56,30 @@ CREATE TABLE IF NOT EXISTS walkforward_schema_version (
     version INTEGER PRIMARY KEY
 )
 """
+
+#: version 3: walkforward_strategy_compare.run_walkforward_strategy_compare()
+#: の戻り値（StrategyCompareResult）を保存するための専用テーブル。
+#: RunnerResult保存（walkforward_runs）とは責務を分離し、StrategyCompare
+#: 全体（各戦略のRunnerResultを含む生JSON）をそのまま保持するだけの
+#: テーブルとする。
+_MIGRATION_V3_SQL = """
+CREATE TABLE IF NOT EXISTS walkforward_compares (
+    compare_run_id TEXT PRIMARY KEY,
+    code TEXT,
+    period TEXT,
+    status TEXT,
+    raw_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+_INSERT_COMPARE_SQL = """
+INSERT INTO walkforward_compares (
+    compare_run_id, code, period, status, raw_json
+) VALUES (?, ?, ?, ?, ?)
+"""
+
+_SELECT_COMPARE_RAW_JSON_SQL = "SELECT raw_json FROM walkforward_compares WHERE compare_run_id = ?"
 
 #: version 1: Phase1〜4時点のベーススキーマ（elapsed_secondsを含まない）。
 #: 既にテーブルが存在する場合は IF NOT EXISTS により何もしない。
@@ -116,12 +142,18 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE walkforward_runs ADD COLUMN elapsed_seconds REAL")
 
 
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    """version 3: walkforward_comparesテーブルを作成する（既存の場合は何もしない）。"""
+    conn.execute(_MIGRATION_V3_SQL)
+
+
 #: 適用順に並んだ (version番号, Migration関数) のリスト。
 #: 将来のスキーマ変更は、この末尾へ (次のversion, 新しいMigration関数) を
 #: 1件追加するだけで対応できる。
 _MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migrate_v1),
     (2, _migrate_v2),
+    (3, _migrate_v3),
 )
 
 
@@ -314,6 +346,82 @@ def list_runner_results(
         保存済みレコードが無い場合は空リスト。
     """
     return search_runner_results(db_path=db_path)
+
+
+def save_compare_result(
+    compare_result: Mapping[str, Any],
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> str:
+    """StrategyCompareResultを加工せずJSON化し、walkforward_comparesへ1件挿入する。
+
+    walkforward_strategy_compare.run_walkforward_strategy_compare() の
+    戻り値をそのまま保存するだけで、中身の解析・ランキング計算・
+    status再計算・health_score抽出・RunnerResultへの変換は一切行わない
+    （save_runner_result()と対称の設計）。
+
+    Args:
+        compare_result: run_walkforward_strategy_compare() の戻り値。
+            json.dumps()できる形であることのみを前提とする。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        保存したレコードのcompare_run_id
+        （compare_result["run_id"]をそのまま返す）。
+
+    Raises:
+        ValueError: compare_resultに"run_id"キーが存在しない、または
+            空の場合。
+        sqlite3.IntegrityError: 同じcompare_run_idが既に保存済みの場合
+            （上書きはせず例外をそのまま送出する）。
+    """
+    compare_run_id = compare_result.get("run_id")
+    if not compare_run_id:
+        raise ValueError("compare_result に run_id が含まれていません。")
+
+    raw_json = json.dumps(compare_result, ensure_ascii=False)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            _INSERT_COMPARE_SQL,
+            (
+                compare_run_id,
+                compare_result.get("code"),
+                compare_result.get("period"),
+                compare_result.get("status"),
+                raw_json,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return compare_run_id
+
+
+def load_compare_result(
+    compare_run_id: str,
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> Optional[dict[str, Any]]:
+    """compare_run_idに対応するStrategyCompareResultを読み込む。
+
+    Args:
+        compare_run_id: 検索対象のcompare_run_id。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        raw_jsonをjson.loads()した辞書（保存時のStrategyCompareResultと
+        同一の内容）。該当レコードが存在しない場合はNone。
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(_SELECT_COMPARE_RAW_JSON_SQL, (compare_run_id,)).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return json.loads(row[0])
 
 
 def search_runner_results(
