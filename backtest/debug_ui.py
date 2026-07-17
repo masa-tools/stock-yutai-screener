@@ -2003,8 +2003,15 @@ def render_walkforward_ranking_tables(ranking: dict) -> None:
                      use_container_width=True, hide_index=True)
     with col3:
         st.caption("Improvement Score順")
-        st.dataframe(_to_df(ranking.get("ranking_by_improvement", []), "improvement_score", "Score"),
-                     use_container_width=True,hide_index=True,)
+        st.dataframe(
+            _to_df(
+                ranking.get("ranking_by_improvement", []),
+                "improvement_score",
+                "Score",
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
                      
 # ════════════════════════════════════════════════
 # 保存済み履歴（Phase3。読み取り専用。walkforward_storage.pyへ完全委譲）
