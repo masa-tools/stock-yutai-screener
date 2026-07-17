@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS walkforward_runs (
     status TEXT,
     started_at TEXT,
     finished_at TEXT,
+    elapsed_seconds REAL,
     runner_schema_version TEXT,
     raw_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -66,8 +67,8 @@ CREATE TABLE IF NOT EXISTS walkforward_runs (
 _INSERT_SQL = """
 INSERT INTO walkforward_runs (
     run_id, compare_run_id, code, strategy_name, period,
-    status, started_at, finished_at, runner_schema_version, raw_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    status, started_at, finished_at, elapsed_seconds, runner_schema_version, raw_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 _SELECT_RAW_JSON_SQL = "SELECT raw_json FROM walkforward_runs WHERE run_id = ?"
@@ -75,8 +76,14 @@ _SELECT_RAW_JSON_SQL = "SELECT raw_json FROM walkforward_runs WHERE run_id = ?"
 _SELECT_LIST_SQL = """
 #: search_runner_results() / list_runner_results() 共通のSELECT対象列。
 #: raw_jsonは一覧・検索いずれの結果にも含めない。
-_LIST_COLUMNS = ("run_id", "code", "strategy_name", "period", "status", "started_at", "created_at")
-
+#: Phase5でメタデータ（runner_schema_version/finished_at/elapsed_seconds）を
+#: 追加。SELECT対象列をこの1箇所に集約しているため、list_runner_results()/
+#: search_runner_results()双方のSQLは変更不要で自動的に反映される。
+_LIST_COLUMNS = (
+    "run_id", "code", "strategy_name", "period", "status",
+    "started_at", "finished_at", "elapsed_seconds",
+    "runner_schema_version", "created_at",
+)
 
 def initialize_database(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
     """walkforward_runsテーブルを作成する（既に存在する場合は何もしない）。
@@ -157,6 +164,7 @@ def save_runner_result(
                 runner_result.get("status"),
                 runner_result.get("started_at"),
                 runner_result.get("finished_at"),
+                runner_result.get("elapsed_seconds"),
                 runner_result.get("runner_schema_version"),
                 raw_json,
             ),
