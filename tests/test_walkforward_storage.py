@@ -18,6 +18,7 @@ from backtest.walkforward_storage import (
     save_runner_result,
     load_runner_result,
     list_runner_results,
+    search_runner_results,
 )
 
 
@@ -205,3 +206,69 @@ def test_list_runner_results_does_not_include_raw_json(db_path):
     assert set(rows[0].keys()) == {
         "run_id", "code", "strategy_name", "period", "status", "started_at", "created_at",
     }
+
+
+# ════════════════════════════════════════════════
+# search_runner_results() のテスト（Phase4）
+# ════════════════════════════════════════════════
+def _seed_search_fixture(db_path):
+    """検索テスト用に、条件の異なる3件を保存するヘルパー。"""
+    initialize_database(db_path)
+    r1 = _dummy_runner_result("run-a")
+    r1["pipeline"] = {"code": "7203", "strategy": "v9", "period": "1y"}
+    r1["status"] = "SUCCESS"
+
+    r2 = _dummy_runner_result("run-b")
+    r2["pipeline"] = {"code": "7203", "strategy": "v8", "period": "2y"}
+    r2["status"] = "PARTIAL_SUCCESS"
+
+    r3 = _dummy_runner_result("run-c")
+    r3["pipeline"] = {"code": "8035", "strategy": "v9", "period": "1y"}
+    r3["status"] = "FAILED"
+
+    for r in (r1, r2, r3):
+        save_runner_result(r, db_path=db_path)
+
+
+def test_search_by_code_only(db_path):
+    _seed_search_fixture(db_path)
+    rows = search_runner_results(code="7203", db_path=db_path)
+    assert {r["run_id"] for r in rows} == {"run-a", "run-b"}
+
+
+def test_search_by_strategy_only(db_path):
+    _seed_search_fixture(db_path)
+    rows = search_runner_results(strategy_name="v9", db_path=db_path)
+    assert {r["run_id"] for r in rows} == {"run-a", "run-c"}
+
+
+def test_search_by_period_only(db_path):
+    _seed_search_fixture(db_path)
+    rows = search_runner_results(period="2y", db_path=db_path)
+    assert {r["run_id"] for r in rows} == {"run-b"}
+
+
+def test_search_by_status_only(db_path):
+    _seed_search_fixture(db_path)
+    rows = search_runner_results(status="FAILED", db_path=db_path)
+    assert {r["run_id"] for r in rows} == {"run-c"}
+
+
+def test_search_with_multiple_conditions_is_and(db_path):
+    """複数条件を指定した場合はAND検索になる（両方満たすもののみ返る）。"""
+    _seed_search_fixture(db_path)
+    rows = search_runner_results(code="7203", strategy_name="v9", db_path=db_path)
+    assert {r["run_id"] for r in rows} == {"run-a"}
+
+
+def test_search_with_no_conditions_returns_all(db_path):
+    """条件を1つも指定しない場合は全件が返る（list_runner_results()と同じ）。"""
+    _seed_search_fixture(db_path)
+    rows = search_runner_results(db_path=db_path)
+    assert {r["run_id"] for r in rows} == {"run-a", "run-b", "run-c"}
+
+
+def test_search_result_does_not_include_raw_json(db_path):
+    _seed_search_fixture(db_path)
+    rows = search_runner_results(code="7203", db_path=db_path)
+    assert all("raw_json" not in r for r in rows)
