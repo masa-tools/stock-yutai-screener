@@ -206,6 +206,11 @@ _SS_KEY_WF_HISTORY_VIEW = "walkforward_history_view_result"
 # そのまま渡す絞り込み条件。「🔍 検索」ボタン押下時のみ更新され、
 # 「🧹 クリア」ボタン押下時にNoneへ戻る。
 _SS_KEY_WF_HISTORY_FILTERS = "walkforward_history_filters"
+# 読込済み履歴（_SS_KEY_WF_HISTORY_VIEW）に対応する一覧行メタデータ
+# （run_id/created_at/runner_schema_version等。Phase5）。
+# 「現在表示中の履歴」情報を render_walkforward_runner_result() の
+# 前後に薄く表示するためだけに使う。既存の描画関数自体は変更しない。
+_SS_KEY_WF_HISTORY_VIEW_META = "walkforward_history_view_meta"
 # Strategy Compare（複数戦略比較）の実行結果セッションキー。
 # キーは (code, period_code, tuple(sorted(選択戦略)), dry_run)。
 # _SS_KEY_WF_CACHEと同じ設計思想（辞書キャッシュ）を踏襲。
@@ -2046,7 +2051,9 @@ def render_walkforward_history_section() -> None:
     if history_view_result is not None:
         st.divider()
         st.markdown("#### 📂 読み込んだ履歴の内容")
+        render_walkforward_history_view_meta()
         render_walkforward_runner_result(history_view_result)
+        render_walkforward_history_view_meta()
                      use_container_width=True, hide_index=True)
 
 
@@ -2107,23 +2114,53 @@ def render_walkforward_history_table(history_rows: list[dict]) -> None:
     walkforward_storage.load_runner_result(run_id) を呼び、取得した
     RunnerResultを _SS_KEY_WF_HISTORY_VIEW へ保存する（表示は
     呼び出し元の render_walkforward_history_section() が担う）。
+    
+    Phase5で保存日時・実行時間・Runner Schema Versionの3列を追加した。
+    いずれもwalkforward_storage側が返す既存の値をそのまま表示するだけで、
+    このファイル内で計算・加工は行わない。
     """
-    header_cols = st.columns([2, 1, 1, 1, 1, 1])
-    for col, label in zip(header_cols, ["保存日時", "銘柄", "戦略", "期間", "Status", ""]):
+    header_cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
+    for col, label in zip(
+        header_cols,
+        ["保存日時", "銘柄", "戦略", "期間", "Status", "実行時間(秒)", "Schema Ver.", ""],
+    ):
         col.markdown(f"**{label}**")
 
     for row in history_rows:
-        cols = st.columns([2, 1, 1, 1, 1, 1])
+        cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
         cols[0].caption(row.get("created_at") or "―")
         cols[1].caption(row.get("code") or "―")
         cols[2].caption(row.get("strategy_name") or "―")
         cols[3].caption(row.get("period") or "―")
         cols[4].caption(row.get("status") or "―")
-        with cols[5]:
+        cols[5].caption(_fmt(row.get("elapsed_seconds")))
+        cols[6].caption(row.get("runner_schema_version") or "―")
+        with cols[7]:
             if st.button("📂 読み込む", key=f"wf_history_load_{row.get('run_id')}"):
                 try:
                     loaded_result = load_runner_result(row.get("run_id"))
                     st.session_state[_SS_KEY_WF_HISTORY_VIEW] = loaded_result
+                    st.session_state[_SS_KEY_WF_HISTORY_VIEW_META] = row
                 except Exception:
                     st.error("❌ 履歴の読込中にエラーが発生しました。")
                     st.code(traceback.format_exc(), language="text")
+
+def render_walkforward_history_view_meta() -> None:
+    """
+    現在表示中の履歴（_SS_KEY_WF_HISTORY_VIEW）に対応する
+    run_id・保存日時・Runner Schema Versionを、小さく1行で表示する。
+
+    render_walkforward_runner_result() の前後に薄く挟むだけの表示で
+    あり、既存の描画関数自体は一切変更しない。walkforward_storage.py
+    が一覧取得時に返した既存の値をそのまま表示するだけで、このファイル
+    内で計算・加工は行わない。メタデータが無い場合（一覧経由ではなく
+    別の手段で結果がセットされた場合等）は何も表示しない。
+    """
+    meta = st.session_state.get(_SS_KEY_WF_HISTORY_VIEW_META)
+    if not meta:
+        return
+    st.caption(
+        f"現在表示中の履歴　run_id: {meta.get('run_id') or '―'} ／ "
+        f"保存日時: {meta.get('created_at') or '―'} ／ "
+        f"Runner Schema Version: {meta.get('runner_schema_version') or '―'}"
+    )
