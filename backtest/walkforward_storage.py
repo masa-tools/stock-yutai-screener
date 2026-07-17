@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Callable, Mapping, Optional, Union
 
 __all__ = [
     "DEFAULT_DB_PATH",
@@ -47,7 +47,17 @@ __all__ = [
 #: 呼び出し側は各関数の db_path 引数で任意のパスへ差し替えられる。
 DEFAULT_DB_PATH = "walkforward.db"
 
-_CREATE_TABLE_SQL = """
+#: Migration管理用テーブル。1行=1つの「適用済みversion」を表す
+#: 単純な履歴テーブル（Migration履歴UIではなく、内部状態管理のみ）。
+_CREATE_SCHEMA_VERSION_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS walkforward_schema_version (
+    version INTEGER PRIMARY KEY
+)
+"""
+
+#: version 1: Phase1〜4時点のベーススキーマ（elapsed_secondsを含まない）。
+#: 既にテーブルが存在する場合は IF NOT EXISTS により何もしない。
+_MIGRATION_V1_SQL = """
 CREATE TABLE IF NOT EXISTS walkforward_runs (
     run_id TEXT PRIMARY KEY,
     compare_run_id TEXT,
@@ -57,7 +67,6 @@ CREATE TABLE IF NOT EXISTS walkforward_runs (
     status TEXT,
     started_at TEXT,
     finished_at TEXT,
-    elapsed_seconds REAL,
     runner_schema_version TEXT,
     raw_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -86,16 +95,97 @@ _LIST_COLUMNS = (
     "runner_schema_version", "created_at",
 )
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """指定テーブルに指定カラムが既に存在するかを確認する（Migration用の判定のみ）。"""
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row[1] == column for row in rows)
+
+
+def _migrate_v1(conn: sqlite3.Connection) -> None:
+    """version 1: walkforward_runsテーブルをベーススキーマで作成する（既存の場合は何もしない）。"""
+    conn.execute(_MIGRATION_V1_SQL)
+
+
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    """version 2: walkforward_runsへelapsed_seconds列を追加する。
+
+    既にPhase5の運用で手動追加済みの環境（既存DB）に対しては、
+    列の存在を確認したうえで二重追加を避ける。
+    """
+    if not _column_exists(conn, "walkforward_runs", "elapsed_seconds"):
+        conn.execute("ALTER TABLE walkforward_runs ADD COLUMN elapsed_seconds REAL")
+
+
+#: 適用順に並んだ (version番号, Migration関数) のリスト。
+#: 将来のスキーマ変更は、この末尾へ (次のversion, 新しいMigration関数) を
+#: 1件追加するだけで対応できる。
+_MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
+    (1, _migrate_v1),
+    (2, _migrate_v2),
+)
+
+
+def _get_current_schema_version(conn: sqlite3.Connection) -> int:
+    """walkforward_schema_versionテーブルから、現在適用済みの最大versionを取得する。
+
+    レコードが1件も無い場合は0を返す（＝未初期化のDBとして扱う）。
+    """
+    row = conn.execute("SELECT MAX(version) FROM walkforward_schema_version").fetchone()
+    return row[0] if row and row[0] is not None else 0
+
+
+def _apply_migration(conn: sqlite3.Connection, version: int,
+                      migrate_fn: Callable[[sqlite3.Connection], None]) -> None:
+    """1つのMigrationを、DDL適用とversion記録を1トランザクションとして実行する。
+
+    `with conn:` はブロック正常終了時にcommit、例外発生時にrollbackする
+    （sqlite3標準のコンテキストマネージャ挙動）。これにより、
+    「スキーマは変更されたがversionは記録されていない」あるいはその逆の
+    中途半端な状態が残らないようにしている。
+
+    Args:
+        conn: 接続済みのSQLite Connection。
+        version: 適用するMigrationのversion番号。
+        migrate_fn: 実際のDDLを実行する関数。
+
+    Raises:
+        Exception: migrate_fn内で発生した例外をそのまま送出する
+            （呼び出し元 initialize_database() へ伝播させ、Migration失敗を
+            隠蔽しない）。
+    """
+    with conn:
+        migrate_fn(conn)
+        conn.execute("INSERT INTO walkforward_schema_version (version) VALUES (?)", (version,))
+
+
 def initialize_database(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
-    """walkforward_runsテーブルを作成する（既に存在する場合は何もしない）。
+    """walkforward_runsテーブルを、必要なMigrationを適用したうえで利用可能な状態にする。
+
+    処理の流れ:
+        1. walkforward_schema_versionテーブルが無ければ作成する。
+        2. 現在適用済みの最大versionを取得する（未初期化なら0）。
+        3. 未適用のMigration（_MIGRATIONS）だけを、version順に適用する。
+
+    既にPhase1〜5で作成済みのDBファイル（walkforward_schema_versionを
+    持たない）に対して実行した場合も、version 0からMigration 1・2が
+    順に適用され、Migration 2は既存のelapsed_seconds列の有無を確認して
+    から追加するため、安全に最新状態へ追従できる。
+
+    本関数の呼び出しはRunnerResult・JSON構造・UIには一切影響しない
+    （テーブル定義のみを操作する）。
 
     Args:
         db_path: SQLiteデータベースファイルのパス。
     """
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.execute(_CREATE_TABLE_SQL)
+        conn.execute(_CREATE_SCHEMA_VERSION_TABLE_SQL)
         conn.commit()
+
+        current_version = _get_current_schema_version(conn)
+        for version, migrate_fn in _MIGRATIONS:
+            if version > current_version:
+                _apply_migration(conn, version, migrate_fn)
     finally:
         conn.close()
 
@@ -278,3 +368,135 @@ def search_runner_results(
         conn.close()
 
     return [dict(zip(_LIST_COLUMNS, row)) for row in rows]
+
+
+# ════════════════════════════════════════════════
+# Migration基盤のテスト（Phase6）
+# ════════════════════════════════════════════════
+def test_new_database_reaches_latest_schema_version(db_path):
+    """新規DB作成時、walkforward_schema_versionへ最新version（2）まで記録される。"""
+    initialize_database(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        versions = [row[0] for row in conn.execute(
+            "SELECT version FROM walkforward_schema_version ORDER BY version"
+        ).fetchall()]
+    finally:
+        conn.close()
+
+    assert versions == [1, 2]
+
+
+def test_migration_adds_elapsed_seconds_to_legacy_database(db_path):
+    """
+    walkforward_schema_versionを持たない「Phase1〜4相当」の旧スキーマDBに
+    対してinitialize_database()を実行すると、elapsed_seconds列が追加される。
+    """
+    # Phase6以前のDB状態を素のSQLで再現する（elapsed_seconds列を持たない）。
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("""
+            CREATE TABLE walkforward_runs (
+                run_id TEXT PRIMARY KEY,
+                compare_run_id TEXT,
+                code TEXT,
+                strategy_name TEXT,
+                period TEXT,
+                status TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                runner_schema_version TEXT,
+                raw_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute(
+            "INSERT INTO walkforward_runs (run_id, code, strategy_name, period, status, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("legacy-run", "7203", "v9", "1y", "SUCCESS", json.dumps(_dummy_runner_result("legacy-run"))),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    initialize_database(db_path)  # Migrationを適用させる
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(walkforward_runs)").fetchall()]
+    finally:
+        conn.close()
+
+    assert "elapsed_seconds" in columns
+
+
+def test_migration_does_not_duplicate_existing_column(db_path):
+    """
+    elapsed_seconds列が既に存在する（Phase5運用で手動追加済み相当の）DBに
+    対してMigrationを適用しても、エラーにならず二重追加もされない。
+    """
+    initialize_database(db_path)  # ここで既にversion 2まで適用済み
+
+    # もう一度初期化しても例外が発生しないこと（冪等性の確認）。
+    initialize_database(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(walkforward_runs)").fetchall()]
+    finally:
+        conn.close()
+
+    assert columns.count("elapsed_seconds") == 1
+
+
+def test_migration_is_idempotent_and_does_not_reinsert_versions(db_path):
+    """Migrationを複数回実行しても、walkforward_schema_versionに重複行が増えない。"""
+    initialize_database(db_path)
+    initialize_database(db_path)
+    initialize_database(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        versions = [row[0] for row in conn.execute(
+            "SELECT version FROM walkforward_schema_version ORDER BY version"
+        ).fetchall()]
+    finally:
+        conn.close()
+
+    assert versions == [1, 2]
+
+
+def test_existing_saved_runner_result_still_readable_after_migration(db_path):
+    """Migration適用前に保存された既存RunnerResultが、Migration後も正しく読み込める。"""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("""
+            CREATE TABLE walkforward_runs (
+                run_id TEXT PRIMARY KEY,
+                compare_run_id TEXT,
+                code TEXT,
+                strategy_name TEXT,
+                period TEXT,
+                status TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                runner_schema_version TEXT,
+                raw_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        result = _dummy_runner_result("legacy-run-2")
+        conn.execute(
+            "INSERT INTO walkforward_runs (run_id, code, strategy_name, period, status, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("legacy-run-2", "7203", "v9", "1y", "SUCCESS", json.dumps(result)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    initialize_database(db_path)
+
+    loaded = load_runner_result("legacy-run-2", db_path=db_path)
+    assert loaded == result
