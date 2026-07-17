@@ -40,6 +40,7 @@ __all__ = [
     "save_runner_result",
     "load_runner_result",
     "list_runner_results",
+    "search_runner_results",
 ]
 
 #: デフォルトのSQLiteデータベースファイルパス。
@@ -72,10 +73,9 @@ INSERT INTO walkforward_runs (
 _SELECT_RAW_JSON_SQL = "SELECT raw_json FROM walkforward_runs WHERE run_id = ?"
 
 _SELECT_LIST_SQL = """
-SELECT run_id, code, strategy_name, period, status, started_at, created_at
-FROM walkforward_runs
-ORDER BY created_at DESC
-"""
+#: search_runner_results() / list_runner_results() 共通のSELECT対象列。
+#: raw_jsonは一覧・検索いずれの結果にも含めない。
+_LIST_COLUMNS = ("run_id", "code", "strategy_name", "period", "status", "started_at", "created_at")
 
 
 def initialize_database(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
@@ -203,6 +203,9 @@ def list_runner_results(
     渡すこと。新しい計算・整形は一切行わず、単純なSELECT結果を
     そのまま返す。
 
+    内部的には search_runner_results() を条件なしで呼び出すだけの
+    薄いラッパーであり、SQL構築ロジックを重複させない。
+
     Args:
         db_path: SQLiteデータベースファイルのパス。
 
@@ -211,11 +214,58 @@ def list_runner_results(
         "started_at", "created_at"}, ...] のリスト（created_at降順）。
         保存済みレコードが無い場合は空リスト。
     """
+    return search_runner_results(db_path=db_path)
+
+
+def search_runner_results(
+    code: Optional[str] = None,
+    strategy_name: Optional[str] = None,
+    period: Optional[str] = None,
+    status: Optional[str] = None,
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    """保存済みRunnerResultを、指定された条件のみでAND絞り込みして検索する。
+
+    引数はすべてOptional。未指定（None）の項目はWHERE句に含めない
+    （＝すべての値を許容する）。すべて未指定の場合は list_runner_results()
+    と同じ全件結果を返す。列名はコード内の固定文字列のみを使用し、
+    ユーザー由来の値は必ずプレースホルダ（?）経由でバインドするため、
+    SQLインジェクションの余地はない。raw_jsonは含まない。新しい計算・
+    判定ロジックは一切行わない（単純な完全一致検索のみ）。
+
+    Args:
+        code: 完全一致させる銘柄コード。
+        strategy_name: 完全一致させる戦略名。
+        period: 完全一致させる期間文字列（例: "1y"）。
+        status: 完全一致させるstatus（"SUCCESS"等）。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        [{"run_id", "code", "strategy_name", "period", "status",
+        "started_at", "created_at"}, ...] のリスト（created_at降順）。
+        該当レコードが無い場合は空リスト。
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    for column, value in (
+        ("code", code),
+        ("strategy_name", strategy_name),
+        ("period", period),
+        ("status", status),
+    ):
+        if value is not None:
+            conditions.append(f"{column} = ?")
+            params.append(value)
+
+    sql = f"SELECT {', '.join(_LIST_COLUMNS)} FROM walkforward_runs"
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY created_at DESC"
+
     conn = sqlite3.connect(str(db_path))
     try:
-        rows = conn.execute(_SELECT_LIST_SQL).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     finally:
         conn.close()
 
-    columns = ("run_id", "code", "strategy_name", "period", "status", "started_at", "created_at")
-    return [dict(zip(columns, row)) for row in rows]
+    return [dict(zip(_LIST_COLUMNS, row)) for row in rows]
