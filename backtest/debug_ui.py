@@ -2060,8 +2060,6 @@ def render_walkforward_history_section() -> None:
         st.markdown("#### 📂 読み込んだ履歴の内容")
         render_walkforward_history_view_meta()
         render_walkforward_runner_result(history_view_result)
-        render_walkforward_history_view_meta()
-                     use_container_width=True, hide_index=True)
 
 
 def render_walkforward_history_search_form() -> None:
