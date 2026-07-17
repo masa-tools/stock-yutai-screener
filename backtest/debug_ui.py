@@ -119,7 +119,12 @@ from backtest.walkforward_runner import run_walkforward_runner
 from backtest.walkforward_strategy_compare import run_walkforward_strategy_compare
 from backtest.walkforward_ranking import build_walkforward_ranking, extract_ranking_metrics
 from backtest.walkforward_export import build_walkforward_csv_exports
-from backtest.walkforward_storage import save_runner_result, list_runner_results, load_runner_result
+from backtest.walkforward_storage import (
+    save_runner_result,
+    list_runner_results,
+    search_runner_results,
+    load_runner_result,
+)
 
 
 # ════════════════════════════════════════════════
@@ -196,6 +201,11 @@ _SS_KEY_WF_CACHE = "walkforward_runner_cache"
 # ようにする。新しいキャッシュ機構ではなく、既存のst.session_stateを
 # そのまま1スロット分利用するだけ。
 _SS_KEY_WF_HISTORY_VIEW = "walkforward_history_view_result"
+# 履歴一覧に適用中の検索条件（Phase4）。
+# None = 検索未適用（全件表示）。dict = search_runner_results()へ
+# そのまま渡す絞り込み条件。「🔍 検索」ボタン押下時のみ更新され、
+# 「🧹 クリア」ボタン押下時にNoneへ戻る。
+_SS_KEY_WF_HISTORY_FILTERS = "walkforward_history_filters"
 # Strategy Compare（複数戦略比較）の実行結果セッションキー。
 # キーは (code, period_code, tuple(sorted(選択戦略)), dry_run)。
 # _SS_KEY_WF_CACHEと同じ設計思想（辞書キャッシュ）を踏襲。
@@ -2012,17 +2022,92 @@ def render_walkforward_history_section() -> None:
     """
     st.markdown("### 📚 保存済み履歴")
 
+    render_walkforward_history_search_form()
+
+    filters = st.session_state.get(_SS_KEY_WF_HISTORY_FILTERS)
+
     try:
-        history_rows = list_runner_results()
+        if filters is None:
+            history_rows = list_runner_results()
+        else:
+            history_rows = search_runner_results(**filters)
     except Exception:
         st.error("❌ 履歴の取得中にエラーが発生しました。")
         st.code(traceback.format_exc(), language="text")
         return
 
     if not history_rows:
-        st.caption("保存済みの履歴はまだありません。")
+        st.caption("該当する履歴がありません。" if filters else "保存済みの履歴はまだありません。")
         return
 
+    render_walkforward_history_table(history_rows)
+
+    history_view_result = st.session_state.get(_SS_KEY_WF_HISTORY_VIEW)
+    if history_view_result is not None:
+        st.divider()
+        st.markdown("#### 📂 読み込んだ履歴の内容")
+        render_walkforward_runner_result(history_view_result)
+                     use_container_width=True, hide_index=True)
+
+
+def render_walkforward_history_search_form() -> None:
+    """
+    保存済み履歴の検索条件フォームを表示する。
+
+    「🔍 検索」ボタンが押された時のみ、選択中の条件を
+    st.session_state[_SS_KEY_WF_HISTORY_FILTERS] へ保存する。
+    「🧹 クリア」ボタンが押された時は当該キーをNoneへ戻し、
+    全件表示（list_runner_results()）へ戻す。検索・全件取得の実行
+    自体は render_walkforward_history_section() 側が行う（このフォームは
+    入力値の収集とボタン処理のみを担当する）。
+    """
+    st.caption("検索条件")
+    col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1, 1])
+
+    with col1:
+        search_code = st.text_input("銘柄コード", value="", key="wf_history_search_code")
+    with col2:
+        strategy_options = ["(すべて)"] + list(STRATEGY_REGISTRY.keys())
+        search_strategy = st.selectbox(
+            "戦略",
+            options=strategy_options,
+            format_func=lambda k: k if k == "(すべて)" else STRATEGY_REGISTRY[k]["label"],
+            key="wf_history_search_strategy",
+        )
+    with col3:
+        period_options = ["(すべて)"] + list(PERIOD_OPTIONS.values())
+        search_period = st.selectbox("期間", options=period_options, key="wf_history_search_period")
+    with col4:
+        status_options = ["(すべて)", "SUCCESS", "PARTIAL_SUCCESS", "FAILED"]
+        search_status = st.selectbox("Status", options=status_options, key="wf_history_search_status")
+    with col5:
+        search_clicked = st.button("🔍 検索", key="wf_history_search_button")
+    with col6:
+        clear_clicked = st.button("🧹 クリア", key="wf_history_clear_button")
+
+    if search_clicked:
+        st.session_state[_SS_KEY_WF_HISTORY_FILTERS] = {
+            "code": search_code or None,
+            "strategy_name": None if search_strategy == "(すべて)" else search_strategy,
+            "period": None if search_period == "(すべて)" else search_period,
+            "status": None if search_status == "(すべて)" else search_status,
+        }
+
+    if clear_clicked:
+        st.session_state[_SS_KEY_WF_HISTORY_FILTERS] = None
+
+
+def render_walkforward_history_table(history_rows: list[dict]) -> None:
+    """
+    履歴一覧（list_runner_results() または search_runner_results() の
+    戻り値）を表として描画する共通関数。全件表示・検索結果表示の
+    両方から呼ばれ、一覧生成コードを重複させない。
+
+    各行の「📂 読み込む」ボタンが押された時のみ
+    walkforward_storage.load_runner_result(run_id) を呼び、取得した
+    RunnerResultを _SS_KEY_WF_HISTORY_VIEW へ保存する（表示は
+    呼び出し元の render_walkforward_history_section() が担う）。
+    """
     header_cols = st.columns([2, 1, 1, 1, 1, 1])
     for col, label in zip(header_cols, ["保存日時", "銘柄", "戦略", "期間", "Status", ""]):
         col.markdown(f"**{label}**")
@@ -2042,10 +2127,3 @@ def render_walkforward_history_section() -> None:
                 except Exception:
                     st.error("❌ 履歴の読込中にエラーが発生しました。")
                     st.code(traceback.format_exc(), language="text")
-
-    history_view_result = st.session_state.get(_SS_KEY_WF_HISTORY_VIEW)
-    if history_view_result is not None:
-        st.divider()
-        st.markdown("#### 📂 読み込んだ履歴の内容")
-        render_walkforward_runner_result(history_view_result)
-                     use_container_width=True, hide_index=True)
