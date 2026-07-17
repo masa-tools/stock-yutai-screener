@@ -272,3 +272,30 @@ def test_search_result_does_not_include_raw_json(db_path):
     _seed_search_fixture(db_path)
     rows = search_runner_results(code="7203", db_path=db_path)
     assert all("raw_json" not in r for r in rows)
+
+
+# ════════════════════════════════════════════════
+# メタデータ拡張のテスト（Phase5）
+# ════════════════════════════════════════════════
+def test_list_runner_results_includes_extended_metadata(db_path):
+    """一覧取得結果に runner_schema_version / finished_at / elapsed_seconds が含まれる。"""
+    initialize_database(db_path)
+    save_runner_result(_dummy_runner_result(), db_path=db_path)
+
+    rows = list_runner_results(db_path=db_path)
+    row = rows[0]
+    assert row["runner_schema_version"] == "1.0"
+    assert row["finished_at"] == "2026-01-01T00:01:00+00:00"
+    assert row["elapsed_seconds"] == 60.0
+
+
+def test_search_runner_results_includes_extended_metadata(db_path):
+    """検索取得結果にも runner_schema_version / finished_at / elapsed_seconds が含まれる。"""
+    initialize_database(db_path)
+    save_runner_result(_dummy_runner_result(), db_path=db_path)
+
+    rows = search_runner_results(code="7203", db_path=db_path)
+    row = rows[0]
+    assert row["runner_schema_version"] == "1.0"
+    assert row["finished_at"] == "2026-01-01T00:01:00+00:00"
+    assert row["elapsed_seconds"] == 60.0
