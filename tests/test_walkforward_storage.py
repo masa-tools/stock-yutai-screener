@@ -19,6 +19,8 @@ from backtest.walkforward_storage import (
     load_runner_result,
     list_runner_results,
     search_runner_results,
+    save_compare_result,
+    load_compare_result,
 )
 
 
@@ -299,3 +301,77 @@ def test_search_runner_results_includes_extended_metadata(db_path):
     assert row["runner_schema_version"] == "1.0"
     assert row["finished_at"] == "2026-01-01T00:01:00+00:00"
     assert row["elapsed_seconds"] == 60.0
+
+
+# ════════════════════════════════════════════════
+# Strategy Compare履歴保存のテスト（Phase7）
+# ════════════════════════════════════════════════
+def _dummy_compare_result(run_id: str = "compare-123") -> dict:
+    """walkforward_strategy_compare.run_walkforward_strategy_compare() の戻り値形状のダミー。"""
+    return {
+        "strategy_compare_schema_version": "1.0",
+        "run_id": run_id,
+        "status": "SUCCESS",
+        "warnings": [],
+        "errors": [],
+        "code": "7203",
+        "period": "1y",
+        "strategies": {
+            "v8": _dummy_runner_result("run-v8"),
+            "v9": _dummy_runner_result("run-v9"),
+        },
+    }
+
+
+def test_migration_v3_creates_walkforward_compares_table(db_path):
+    """Migration v3適用後、walkforward_comparesテーブルが存在する。"""
+    initialize_database(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        tables = [row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='walkforward_compares'"
+        ).fetchall()]
+        versions = [row[0] for row in conn.execute(
+            "SELECT version FROM walkforward_schema_version ORDER BY version"
+        ).fetchall()]
+    finally:
+        conn.close()
+
+    assert tables == ["walkforward_compares"]
+    assert versions == [1, 2, 3]
+
+
+def test_save_and_load_compare_result_returns_identical_json(db_path):
+    """保存→読込で、保存前のStrategyCompareResultと完全一致するJSONが返る。"""
+    initialize_database(db_path)
+    compare_result = _dummy_compare_result()
+
+    saved_id = save_compare_result(compare_result, db_path=db_path)
+    loaded = load_compare_result(saved_id, db_path=db_path)
+
+    assert saved_id == "compare-123"
+    assert loaded == compare_result
+
+
+def test_load_nonexistent_compare_run_id_returns_none(db_path):
+    """存在しないcompare_run_idを読み込むとNoneが返る。"""
+    initialize_database(db_path)
+    assert load_compare_result("does-not-exist", db_path=db_path) is None
+
+
+def test_save_compare_result_without_run_id_raises_value_error(db_path):
+    """run_idキーが無いcompare_resultはValueErrorになる。"""
+    initialize_database(db_path)
+    with pytest.raises(ValueError):
+        save_compare_result({"status": "SUCCESS"}, db_path=db_path)
+
+
+def test_duplicate_compare_run_id_raises_integrity_error(db_path):
+    """同じcompare_run_idを2回保存すると、上書きせず例外を送出する。"""
+    initialize_database(db_path)
+    compare_result = _dummy_compare_result()
+    save_compare_result(compare_result, db_path=db_path)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        save_compare_result(compare_result, db_path=db_path)
