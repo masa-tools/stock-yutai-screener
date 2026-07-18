@@ -124,6 +124,9 @@ from backtest.walkforward_storage import (
     list_runner_results,
     search_runner_results,
     load_runner_result,
+    list_compare_results,
+    search_compare_results,
+    load_compare_result,
 )
 
 
@@ -211,6 +214,14 @@ _SS_KEY_WF_HISTORY_FILTERS = "walkforward_history_filters"
 # 「現在表示中の履歴」情報を render_walkforward_runner_result() の
 # 前後に薄く表示するためだけに使う。既存の描画関数自体は変更しない。
 _SS_KEY_WF_HISTORY_VIEW_META = "walkforward_history_view_meta"
+# Strategy Compare履歴に適用中の検索条件（Phase9）。
+# None = 検索未適用（全件表示）。Runner履歴用の_SS_KEY_WF_HISTORY_FILTERSとは
+# 独立したキーとし、互いに上書きしない。
+_SS_KEY_WF_COMPARE_HISTORY_FILTERS = "walkforward_compare_history_filters"
+# SQLiteから読み込んだCompare履歴1件分の表示専用スロット（Phase9）。
+# Runner履歴用の_SS_KEY_WF_HISTORY_VIEWとは独立したキーとし、
+# 互いに上書きしない。
+_SS_KEY_WF_COMPARE_HISTORY_VIEW = "walkforward_compare_history_view_result"
 # Strategy Compare（複数戦略比較）の実行結果セッションキー。
 # キーは (code, period_code, tuple(sorted(選択戦略)), dry_run)。
 # _SS_KEY_WF_CACHEと同じ設計思想（辞書キャッシュ）を踏襲。
@@ -1317,6 +1328,9 @@ def render_evaluation_hub_section(res_df: pd.DataFrame, meta: dict,
         st.divider()
         render_walkforward_history_section()
 
+    st.divider()
+    render_walkforward_compare_history_section()
+
 
 def _render_eval_rating(view: dict | None) -> None:
     """① Rating Summary: evaluation.render_rating_view()の戻り値を表示する。"""
@@ -1944,6 +1958,23 @@ def render_walkforward_strategy_compare_section(
         st.info("「▶ Strategy Compare 実行」ボタンを押すと、選択した戦略のWalk Forwardをまとめて実行します。")
         return
 
+    render_walkforward_compare_result_body(compare_result)
+
+
+def render_walkforward_compare_result_body(compare_result: dict) -> None:
+    """
+    StrategyCompareResult（1件）の中身を表示する。
+
+    render_walkforward_strategy_compare_section()（今回実行した比較結果の
+    表示）と render_walkforward_compare_history_section()（SQLiteから
+    読み込んだ過去の比較結果の表示）の両方から呼ばれる共通表示関数
+    （Phase9で render_walkforward_strategy_compare_section() から
+    純粋なコード移動のみで抽出した。表示内容・ロジックは一切変更していない）。
+
+    Compare JSONの加工・RunnerResultへの変換・新しいランキング計算は
+    行わず、walkforward_ranking.build_walkforward_ranking()（無変更）の
+    呼び出し結果をそのまま表示するだけ。
+    """
     for e in compare_result.get("errors") or []:
         st.error(f"[{e.get('strategy')}] {e.get('message')}")
 
@@ -1953,9 +1984,8 @@ def render_walkforward_strategy_compare_section(
         return
 
     # 抽出処理の二重実装を避けるため、build_walkforward_ranking()を1回だけ
-    # 呼び出し、その"metrics"（walkforward_ranking.extract_ranking_metrics()
-    # が算出した値）を戦略別サマリー表・ランキング表の両方で共通利用する
-    # （RC監査 M-1対応）。
+    # 呼び出し、その"metrics"を戦略別サマリー表・ランキング表の両方で
+    # 共通利用する（RC監査 M-1対応。Phase9でも変更なし）。
     ranking = build_walkforward_ranking(strategies_result)
 
     st.markdown("#### 📊 戦略別サマリー")
@@ -2169,3 +2199,145 @@ def render_walkforward_history_view_meta() -> None:
         f"保存日時: {meta.get('created_at') or '―'} ／ "
         f"Runner Schema Version: {meta.get('runner_schema_version') or '―'}"
     )
+
+
+# ════════════════════════════════════════════════
+# Strategy Compare履歴（Phase9。読み取り専用。walkforward_storage.pyへ完全委譲）
+# ════════════════════════════════════════════════
+def render_walkforward_compare_history_section() -> None:
+    """
+    SQLiteへ保存済みのStrategy Compare結果を検索・一覧表示する（読み取り専用）。
+
+    walkforward_storage.list_compare_results() / search_compare_results()
+    （いずれも無変更）の戻り値をそのまま表として表示するだけで、新しい
+    集計・加工は行わない。各行の「📂 読み込む」ボタンが押された時のみ
+    walkforward_storage.load_compare_result(compare_run_id) を呼び、
+    取得したStrategyCompareResultを render_walkforward_compare_result_body()
+    （既存のStrategy Compare表示関数）へそのまま渡す。新しい表示コードは
+    書かない。
+
+    Runner履歴セクション（render_walkforward_history_section、無変更）とは
+    完全に独立したセッションキーを使用し、互いに上書きしない。
+    """
+    st.markdown("### 📚 Strategy Compare履歴")
+
+    render_walkforward_compare_history_search_form()
+
+    filters = st.session_state.get(_SS_KEY_WF_COMPARE_HISTORY_FILTERS)
+
+    try:
+        if filters is None:
+            history_rows = list_compare_results()
+        else:
+            history_rows = search_compare_results(**filters)
+    except Exception:
+        st.error("❌ Strategy Compare履歴の取得中にエラーが発生しました。")
+        st.code(traceback.format_exc(), language="text")
+        return
+
+    if not history_rows:
+        st.caption("該当する履歴がありません。" if filters else "保存済みのStrategy Compare履歴はまだありません。")
+        return
+
+    columns = [
+        ("created_at", "保存日時"),
+        ("code", "銘柄"),
+        ("period", "期間"),
+        ("status", "Status"),
+    ]
+
+    def _on_load(row: dict) -> None:
+        try:
+            loaded_result = load_compare_result(row.get("compare_run_id"))
+            st.session_state[_SS_KEY_WF_COMPARE_HISTORY_VIEW] = loaded_result
+        except Exception:
+            st.error("❌ Strategy Compare履歴の読込中にエラーが発生しました。")
+            st.code(traceback.format_exc(), language="text")
+
+    render_history_table_generic(
+        rows=history_rows,
+        columns=columns,
+        id_key="compare_run_id",
+        load_button_key_prefix="wf_compare_history_load",
+        on_load=_on_load,
+    )
+
+    history_view_result = st.session_state.get(_SS_KEY_WF_COMPARE_HISTORY_VIEW)
+    if history_view_result is not None:
+        st.divider()
+        st.markdown("#### 📂 読み込んだStrategy Compare履歴の内容")
+        render_walkforward_compare_result_body(history_view_result)
+
+
+def render_walkforward_compare_history_search_form() -> None:
+    """
+    Strategy Compare履歴の検索条件フォーム（code / period / status のみ）を表示する。
+
+    「🔍 検索」ボタンが押された時のみ、選択中の条件を
+    st.session_state[_SS_KEY_WF_COMPARE_HISTORY_FILTERS] へ保存する。
+    「🧹 クリア」ボタンが押された時は当該キーをNoneへ戻し、全件表示
+    （list_compare_results()）へ戻す。Runner履歴の検索フォーム
+    （render_walkforward_history_search_form、無変更）とは独立しており、
+    互いのセッション状態を書き換えない。
+    """
+    st.caption("検索条件")
+    col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 1, 1])
+
+    with col1:
+        search_code = st.text_input("銘柄コード", value="", key="wf_compare_history_search_code")
+    with col2:
+        period_options = ["(すべて)"] + list(PERIOD_OPTIONS.values())
+        search_period = st.selectbox("期間", options=period_options, key="wf_compare_history_search_period")
+    with col3:
+        status_options = ["(すべて)", "SUCCESS", "PARTIAL_SUCCESS", "FAILED"]
+        search_status = st.selectbox("Status", options=status_options, key="wf_compare_history_search_status")
+    with col4:
+        search_clicked = st.button("🔍 検索", key="wf_compare_history_search_button")
+    with col5:
+        clear_clicked = st.button("🧹 クリア", key="wf_compare_history_clear_button")
+
+    if search_clicked:
+        st.session_state[_SS_KEY_WF_COMPARE_HISTORY_FILTERS] = {
+            "code": search_code or None,
+            "period": None if search_period == "(すべて)" else search_period,
+            "status": None if search_status == "(すべて)" else search_status,
+        }
+
+    if clear_clicked:
+        st.session_state[_SS_KEY_WF_COMPARE_HISTORY_FILTERS] = None
+
+
+def render_history_table_generic(rows, columns, id_key, load_button_key_prefix, on_load) -> None:
+    """
+    「値の列＋読み込むボタン」という形の履歴テーブルを描画する汎用ヘルパー。
+
+    Strategy Compare履歴（render_walkforward_compare_history_section）が
+    Runner履歴（render_walkforward_history_table）と同じ「行を並べて末尾に
+    読み込むボタンを置く」という描画パターンを必要としたため、今回新規に
+    追加する側をこの共通ヘルパーへ切り出した。Runner履歴側は列構成
+    （strategy_name/elapsed_seconds/schema_version等）がStrategy Compare
+    と異なり、かつ既存表示への影響を避けるため今回は据え置いているが、
+    本ヘルパー自体は両者が将来的に統合できる汎用な形にしてある。
+
+    Args:
+        rows: 表示するレコードのリスト（dictのリスト）。
+        columns: (キー, 表示ラベル) のタプルのリスト。表示順もこの順。
+        id_key: 各行を一意に識別するキー名（ボタンのkey生成に使用）。
+        load_button_key_prefix: st.buttonのkeyに使う接頭辞。
+        on_load: 読み込むボタンが押された時に呼ばれるコールバック
+            （該当行のdictを1つ引数として受け取る）。
+    """
+    widths = [2] + [1] * (len(columns) - 1) + [1]
+    header_cols = st.columns(widths)
+    for i, (_, label) in enumerate(columns):
+        header_cols[i].markdown(f"**{label}**")
+    header_cols[-1].markdown("**操作**")
+
+    for row in rows:
+        cols = st.columns(widths)
+        for i, (key, _) in enumerate(columns):
+            value = row.get(key)
+            cols[i].caption(value if value not in (None, "") else "―")
+        with cols[-1]:
+            if st.button("📂 読み込む", key=f"{load_button_key_prefix}_{row.get(id_key)}"):
+                on_load(row)
