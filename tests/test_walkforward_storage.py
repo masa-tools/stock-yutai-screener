@@ -21,6 +21,8 @@ from backtest.walkforward_storage import (
     search_runner_results,
     save_compare_result,
     load_compare_result,
+    list_compare_results,
+    search_compare_results,
 )
 
 
@@ -375,3 +377,115 @@ def test_duplicate_compare_run_id_raises_integrity_error(db_path):
 
     with pytest.raises(sqlite3.IntegrityError):
         save_compare_result(compare_result, db_path=db_path)
+
+
+# ════════════════════════════════════════════════
+# Strategy Compare履歴 一覧・検索のテスト（Phase8）
+# ════════════════════════════════════════════════
+def test_list_compare_results_empty(db_path):
+    """保存済みレコードが無い場合、空リストが返る。"""
+    initialize_database(db_path)
+    assert list_compare_results(db_path=db_path) == []
+
+
+def test_list_compare_results_returns_multiple_entries(db_path):
+    """複数件保存した場合、すべてのcompare_run_idが一覧へ含まれる。"""
+    initialize_database(db_path)
+    save_compare_result(_dummy_compare_result("compare-1"), db_path=db_path)
+    save_compare_result(_dummy_compare_result("compare-2"), db_path=db_path)
+
+    rows = list_compare_results(db_path=db_path)
+    assert {r["compare_run_id"] for r in rows} == {"compare-1", "compare-2"}
+
+
+def test_list_compare_results_ordered_by_created_at_desc(db_path):
+    """created_at降順（後から保存したものが先頭）で返る。"""
+    initialize_database(db_path)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO walkforward_compares (compare_run_id, code, period, status, raw_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("compare-old", "7203", "1y", "SUCCESS", "{}", "2026-01-01T00:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO walkforward_compares (compare_run_id, code, period, status, raw_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("compare-new", "7203", "1y", "SUCCESS", "{}", "2026-01-02T00:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = list_compare_results(db_path=db_path)
+    assert [r["compare_run_id"] for r in rows] == ["compare-new", "compare-old"]
+
+
+def test_list_compare_results_does_not_include_raw_json(db_path):
+    """一覧取得の戻り値にraw_jsonキーが含まれない。"""
+    initialize_database(db_path)
+    save_compare_result(_dummy_compare_result(), db_path=db_path)
+
+    rows = list_compare_results(db_path=db_path)
+    assert "raw_json" not in rows[0]
+    assert set(rows[0].keys()) == {"compare_run_id", "code", "period", "status", "created_at"}
+
+
+def _seed_compare_search_fixture(db_path):
+    """検索テスト用に、条件の異なる3件を保存するヘルパー。"""
+    initialize_database(db_path)
+    c1 = _dummy_compare_result("compare-a")
+    c1["code"] = "7203"
+    c1["period"] = "1y"
+    c1["status"] = "SUCCESS"
+
+    c2 = _dummy_compare_result("compare-b")
+    c2["code"] = "7203"
+    c2["period"] = "2y"
+    c2["status"] = "PARTIAL_SUCCESS"
+
+    c3 = _dummy_compare_result("compare-c")
+    c3["code"] = "8035"
+    c3["period"] = "1y"
+    c3["status"] = "FAILED"
+
+    for c in (c1, c2, c3):
+        save_compare_result(c, db_path=db_path)
+
+
+def test_search_compare_results_by_code_only(db_path):
+    _seed_compare_search_fixture(db_path)
+    rows = search_compare_results(code="7203", db_path=db_path)
+    assert {r["compare_run_id"] for r in rows} == {"compare-a", "compare-b"}
+
+
+def test_search_compare_results_by_period_only(db_path):
+    _seed_compare_search_fixture(db_path)
+    rows = search_compare_results(period="2y", db_path=db_path)
+    assert {r["compare_run_id"] for r in rows} == {"compare-b"}
+
+
+def test_search_compare_results_by_status_only(db_path):
+    _seed_compare_search_fixture(db_path)
+    rows = search_compare_results(status="FAILED", db_path=db_path)
+    assert {r["compare_run_id"] for r in rows} == {"compare-c"}
+
+
+def test_search_compare_results_with_multiple_conditions_is_and(db_path):
+    """複数条件を指定した場合はAND検索になる。"""
+    _seed_compare_search_fixture(db_path)
+    rows = search_compare_results(code="7203", period="1y", db_path=db_path)
+    assert {r["compare_run_id"] for r in rows} == {"compare-a"}
+
+
+def test_search_compare_results_with_no_conditions_returns_all(db_path):
+    """条件を1つも指定しない場合は全件が返る（list_compare_results()と同じ）。"""
+    _seed_compare_search_fixture(db_path)
+    rows = search_compare_results(db_path=db_path)
+    assert {r["compare_run_id"] for r in rows} == {"compare-a", "compare-b", "compare-c"}
+
+
+def test_search_compare_results_does_not_include_raw_json(db_path):
+    _seed_compare_search_fixture(db_path)
+    rows = search_compare_results(code="7203", db_path=db_path)
+    assert all("raw_json" not in r for r in rows)
