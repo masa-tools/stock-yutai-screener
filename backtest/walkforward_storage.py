@@ -43,6 +43,8 @@ __all__ = [
     "search_runner_results",
     "save_compare_result",
     "load_compare_result",
+    "list_compare_results",
+    "search_compare_results",
 ]
 
 #: デフォルトのSQLiteデータベースファイルパス。
@@ -80,6 +82,11 @@ INSERT INTO walkforward_compares (
 """
 
 _SELECT_COMPARE_RAW_JSON_SQL = "SELECT raw_json FROM walkforward_compares WHERE compare_run_id = ?"
+
+#: search_compare_results() / list_compare_results() 共通のSELECT対象列。
+#: raw_jsonは一覧・検索いずれの結果にも含めない
+#: （walkforward_runs側の_LIST_COLUMNSと同じ設計方針）。
+_LIST_COMPARE_COLUMNS = ("compare_run_id", "code", "period", "status", "created_at")
 
 #: version 1: Phase1〜4時点のベーススキーマ（elapsed_secondsを含まない）。
 #: 既にテーブルが存在する場合は IF NOT EXISTS により何もしない。
@@ -322,6 +329,81 @@ def load_runner_result(
     if row is None:
         return None
     return json.loads(row[0])
+
+
+def list_compare_results(
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    """保存済みStrategyCompareResultの一覧を、保存日時（created_at）降順で返す。
+
+    raw_jsonは含まない。詳細を取得したい場合は、戻り値の
+    "compare_run_id"を load_compare_result() へ渡すこと。新しい計算・
+    整形は一切行わず、単純なSELECT結果をそのまま返す。
+
+    内部的には search_compare_results() を条件なしで呼び出すだけの
+    薄いラッパーであり、SQL構築ロジックを重複させない
+    （list_runner_results()と同じ設計）。
+
+    Args:
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        [{"compare_run_id", "code", "period", "status", "created_at"}, ...]
+        のリスト（created_at降順）。保存済みレコードが無い場合は空リスト。
+    """
+    return search_compare_results(db_path=db_path)
+
+
+def search_compare_results(
+    code: Optional[str] = None,
+    period: Optional[str] = None,
+    status: Optional[str] = None,
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    """保存済みStrategyCompareResultを、指定された条件のみでAND絞り込みして検索する。
+
+    引数はすべてOptional。未指定（None）の項目はWHERE句に含めない
+    （＝すべての値を許容する）。すべて未指定の場合は list_compare_results()
+    と同じ全件結果を返す。列名はコード内の固定文字列のみを使用し、
+    ユーザー由来の値は必ずプレースホルダ（?）経由でバインドするため、
+    SQLインジェクションの余地はない。raw_jsonは含まない。新しい計算・
+    判定ロジック（StrategyCompare解析・ランキング生成・RunnerResult
+    変換・HealthScore抽出・Status再計算）は一切行わない
+    （search_runner_results()と同じ設計）。
+
+    Args:
+        code: 完全一致させる銘柄コード。
+        period: 完全一致させる期間文字列（例: "1y"）。
+        status: 完全一致させるstatus（"SUCCESS"等）。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        [{"compare_run_id", "code", "period", "status", "created_at"}, ...]
+        のリスト（created_at降順）。該当レコードが無い場合は空リスト。
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    for column, value in (
+        ("code", code),
+        ("period", period),
+        ("status", status),
+    ):
+        if value is not None:
+            conditions.append(f"{column} = ?")
+            params.append(value)
+
+    sql = f"SELECT {', '.join(_LIST_COMPARE_COLUMNS)} FROM walkforward_compares"
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY created_at DESC"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(zip(_LIST_COMPARE_COLUMNS, row)) for row in rows]
 
 
 def list_runner_results(
