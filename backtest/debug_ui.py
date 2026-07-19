@@ -127,6 +127,8 @@ from backtest.walkforward_storage import (
     list_compare_results,
     search_compare_results,
     load_compare_result,
+    delete_runner_result,
+    delete_compare_result,
 )
 
 
@@ -2154,15 +2156,15 @@ def render_walkforward_history_table(history_rows: list[dict]) -> None:
     いずれもwalkforward_storage側が返す既存の値をそのまま表示するだけで、
     このファイル内で計算・加工は行わない。
     """
-    header_cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
+    header_cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1, 1])
     for col, label in zip(
         header_cols,
-        ["保存日時", "銘柄", "戦略", "期間", "Status", "実行時間(秒)", "Schema Ver.", ""],
+        ["保存日時", "銘柄", "戦略", "期間", "Status", "実行時間(秒)", "Schema Ver.", "", ""],
     ):
         col.markdown(f"**{label}**")
 
     for row in history_rows:
-        cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
+        cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1, 1])
         cols[0].caption(row.get("created_at") or "―")
         cols[1].caption(row.get("code") or "―")
         cols[2].caption(row.get("strategy_name") or "―")
@@ -2179,6 +2181,17 @@ def render_walkforward_history_table(history_rows: list[dict]) -> None:
                 except Exception:
                     st.error("❌ 履歴の読込中にエラーが発生しました。")
                     st.code(traceback.format_exc(), language="text")
+        with cols[8]:
+            if st.button("🗑 削除", key=f"wf_history_delete_{row.get('run_id')}"):
+                try:
+                    deleted = delete_runner_result(row.get("run_id"))
+                    if deleted:
+                        st.success(f"✅ 削除しました（run_id: {row.get('run_id')}）")
+                    else:
+                        st.info("ℹ️ 対象の履歴が見つかりませんでした。")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"❌ 削除中にエラーが発生しました: {type(exc).__name__}: {exc}")
 
 def render_walkforward_history_view_meta() -> None:
     """
@@ -2254,12 +2267,25 @@ def render_walkforward_compare_history_section() -> None:
             st.error("❌ Strategy Compare履歴の読込中にエラーが発生しました。")
             st.code(traceback.format_exc(), language="text")
 
+    def _on_delete(row: dict) -> None:
+        try:
+            deleted = delete_compare_result(row.get("compare_run_id"))
+            if deleted:
+                st.success(f"✅ 削除しました（compare_run_id: {row.get('compare_run_id')}）")
+            else:
+                st.info("ℹ️ 対象の履歴が見つかりませんでした。")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"❌ 削除中にエラーが発生しました: {type(exc).__name__}: {exc}")
+
     render_history_table_generic(
         rows=history_rows,
         columns=columns,
         id_key="compare_run_id",
         load_button_key_prefix="wf_compare_history_load",
         on_load=_on_load,
+        delete_button_key_prefix="wf_compare_history_delete",
+        on_delete=_on_delete,
     )
 
     history_view_result = st.session_state.get(_SS_KEY_WF_COMPARE_HISTORY_VIEW)
@@ -2308,8 +2334,14 @@ def render_walkforward_compare_history_search_form() -> None:
 
 
 def render_history_table_generic(rows, columns, id_key, load_button_key_prefix, on_load) -> None:
+    def render_history_table_generic(
+    rows, columns, id_key, load_button_key_prefix, on_load,
+    delete_button_key_prefix=None, on_delete=None,
+) -> None:
     """
     「値の列＋読み込むボタン」という形の履歴テーブルを描画する汎用ヘルパー。
+    delete_button_key_prefix/on_delete を指定した場合、「🗑 削除」ボタンも
+    合わせて描画する（Phase10）。
 
     Strategy Compare履歴（render_walkforward_compare_history_section）が
     Runner履歴（render_walkforward_history_table）と同じ「行を並べて末尾に
@@ -2326,18 +2358,29 @@ def render_history_table_generic(rows, columns, id_key, load_button_key_prefix, 
         load_button_key_prefix: st.buttonのkeyに使う接頭辞。
         on_load: 読み込むボタンが押された時に呼ばれるコールバック
             （該当行のdictを1つ引数として受け取る）。
+        delete_button_key_prefix: 削除ボタンのst.buttonキー接頭辞
+            （Noneの場合、削除ボタンは表示しない）。
+        on_delete: 削除ボタンが押された時に呼ばれるコールバック
+            （該当行のdictを1つ引数として受け取る）。
     """
-    widths = [2] + [1] * (len(columns) - 1) + [1]
+    show_delete = delete_button_key_prefix is not None and on_delete is not None
+    widths = [2] + [1] * (len(columns) - 1) + [1] + ([1] if show_delete else [])
     header_cols = st.columns(widths)
     for i, (_, label) in enumerate(columns):
         header_cols[i].markdown(f"**{label}**")
-    header_cols[-1].markdown("**操作**")
+    header_cols[len(columns)].markdown("**読込**")
+    if show_delete:
+        header_cols[-1].markdown("**削除**")
 
     for row in rows:
         cols = st.columns(widths)
         for i, (key, _) in enumerate(columns):
             value = row.get(key)
             cols[i].caption(value if value not in (None, "") else "―")
-        with cols[-1]:
+        with cols[len(columns)]:
             if st.button("📂 読み込む", key=f"{load_button_key_prefix}_{row.get(id_key)}"):
                 on_load(row)
+        if show_delete:
+            with cols[-1]:
+                if st.button("🗑 削除", key=f"{delete_button_key_prefix}_{row.get(id_key)}"):
+                    on_delete(row)
