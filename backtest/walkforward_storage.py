@@ -159,6 +159,89 @@ def _migrate_v3(conn: sqlite3.Connection) -> None:
     conn.execute(_MIGRATION_V3_SQL)
 
 
+# ════════════════════════════════════════════════
+# 共通ヘルパー（Phase11: SQL重複排除のためのリファクタリング）
+# ════════════════════════════════════════════════
+def _fetch_raw_json(sql: str, param: str, db_path: Union[str, Path]) -> Optional[dict[str, Any]]:
+    """1件のraw_json列をSELECTし、存在すればjson.loads()した辞書を、存在しなければNoneを返す。
+
+    load_runner_result() / load_compare_result() 共通の
+    「SELECT→fetchone→json.loads()」という定型パターンを1箇所へ集約
+    したもの。新しい計算・解釈は一切行わない。
+
+    Args:
+        sql: "SELECT raw_json FROM ... WHERE ... = ?" の形のSQL文
+            （プレースホルダは1つのみを想定）。
+        param: プレースホルダへバインドする値。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        該当行があればjson.loads()した辞書、無ければNone。
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(sql, (param,)).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return json.loads(row[0])
+
+
+def _execute_delete(sql: str, param: str, db_path: Union[str, Path]) -> bool:
+    """1件のDELETE文を実行し、実際に削除された行があったかを返す。
+
+    delete_runner_result() / delete_compare_result() 共通の
+    「接続→DELETE実行→commit→切断→rowcount判定」という定型パターンを
+    1箇所へ集約したもの。新しい判定ロジックは持たない。
+
+    Args:
+        sql: "DELETE FROM ... WHERE ... = ?" の形のSQL文
+            （プレースホルダは1つのみを想定）。
+        param: プレースホルダへバインドする値。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        True: 1件以上削除された場合。
+        False: 対象が存在せず何も削除されなかった場合。
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute(sql, (param,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def _build_where_clause(
+    filters: tuple[tuple[str, Optional[Any]], ...]
+) -> tuple[str, list[Any]]:
+    """(列名, 値) のタプル列から、値がNoneでない項目だけを使ったWHERE句を組み立てる。
+
+    search_runner_results() / search_compare_results() 共通の
+    「未指定(None)の項目はAND条件へ含めない」というWHERE構築ループを
+    1箇所へ集約したもの。列名は呼び出し元が固定文字列として渡す前提で
+    あり、値は常にプレースホルダ経由でバインドするための一覧を返すのみ
+    （SQL文字列へ値を直接埋め込むことはしない）。新しい検索条件・
+    判定ロジックは追加しない。
+
+    Args:
+        filters: (列名, 値) のタプルのタプル。値がNoneの項目は無視する。
+
+    Returns:
+        (WHERE句の文字列（例: "code = ? AND status = ?"。条件が無ければ
+        空文字列）, プレースホルダへバインドする値のリスト)。
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    for column, value in filters:
+        if value is not None:
+            conditions.append(f"{column} = ?")
+            params.append(value)
+    return " AND ".join(conditions), params
+
 #: 適用順に並んだ (version番号, Migration関数) のリスト。
 #: 将来のスキーマ変更は、この末尾へ (次のversion, 新しいMigration関数) を
 #: 1件追加するだけで対応できる。
@@ -317,6 +400,9 @@ def load_runner_result(
 ) -> Optional[dict[str, Any]]:
     """run_idに対応するRunnerResultを読み込む。
 
+    実処理は _fetch_raw_json() へ委譲する（load_compare_result()と
+    共通のSELECT定型パターンを重複させないため。Phase11）。
+
     Args:
         run_id: 検索対象のrun_id。
         db_path: SQLiteデータベースファイルのパス。
@@ -325,15 +411,7 @@ def load_runner_result(
         raw_jsonをjson.loads()した辞書（保存時のRunnerResultと同一の
         内容）。該当レコードが存在しない場合はNone。
     """
-    conn = sqlite3.connect(str(db_path))
-    try:
-        row = conn.execute(_SELECT_RAW_JSON_SQL, (run_id,)).fetchone()
-    finally:
-        conn.close()
-
-    if row is None:
-        return None
-    return json.loads(row[0])
+    return _fetch_raw_json(_SELECT_RAW_JSON_SQL, run_id, db_path)
 
 
 def list_compare_results(
@@ -386,20 +464,15 @@ def search_compare_results(
         [{"compare_run_id", "code", "period", "status", "created_at"}, ...]
         のリスト（created_at降順）。該当レコードが無い場合は空リスト。
     """
-    conditions: list[str] = []
-    params: list[Any] = []
-    for column, value in (
+    where_clause, params = _build_where_clause((
         ("code", code),
         ("period", period),
         ("status", status),
-    ):
-        if value is not None:
-            conditions.append(f"{column} = ?")
-            params.append(value)
+    ))
 
     sql = f"SELECT {', '.join(_LIST_COMPARE_COLUMNS)} FROM walkforward_compares"
-    if conditions:
-        sql += " WHERE " + " AND ".join(conditions)
+    if where_clause:
+        sql += " WHERE " + where_clause
     sql += " ORDER BY created_at DESC"
 
     conn = sqlite3.connect(str(db_path))
@@ -429,13 +502,7 @@ def delete_runner_result(
         True: レコードが削除された場合。
         False: 対象のrun_idが存在せず、何も削除されなかった場合。
     """
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cursor = conn.execute(_DELETE_RUNNER_RESULT_SQL, (run_id,))
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    return _execute_delete(_DELETE_RUNNER_RESULT_SQL, run_id, db_path)
 
 
 def delete_compare_result(
@@ -456,13 +523,7 @@ def delete_compare_result(
         True: レコードが削除された場合。
         False: 対象のcompare_run_idが存在せず、何も削除されなかった場合。
     """
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cursor = conn.execute(_DELETE_COMPARE_RESULT_SQL, (compare_run_id,))
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    return _execute_delete(_DELETE_COMPARE_RESULT_SQL, compare_run_id, db_path)
 
 
 def list_runner_results(
@@ -546,6 +607,9 @@ def load_compare_result(
 ) -> Optional[dict[str, Any]]:
     """compare_run_idに対応するStrategyCompareResultを読み込む。
 
+    実処理は _fetch_raw_json() へ委譲する（load_runner_result()と
+    共通のSELECT定型パターンを重複させないため。Phase11）。
+
     Args:
         compare_run_id: 検索対象のcompare_run_id。
         db_path: SQLiteデータベースファイルのパス。
@@ -554,15 +618,7 @@ def load_compare_result(
         raw_jsonをjson.loads()した辞書（保存時のStrategyCompareResultと
         同一の内容）。該当レコードが存在しない場合はNone。
     """
-    conn = sqlite3.connect(str(db_path))
-    try:
-        row = conn.execute(_SELECT_COMPARE_RAW_JSON_SQL, (compare_run_id,)).fetchone()
-    finally:
-        conn.close()
-
-    if row is None:
-        return None
-    return json.loads(row[0])
+    return _fetch_raw_json(_SELECT_COMPARE_RAW_JSON_SQL, compare_run_id, db_path)
 
 
 def search_runner_results(
@@ -593,21 +649,16 @@ def search_runner_results(
         "started_at", "created_at"}, ...] のリスト（created_at降順）。
         該当レコードが無い場合は空リスト。
     """
-    conditions: list[str] = []
-    params: list[Any] = []
-    for column, value in (
+    where_clause, params = _build_where_clause((
         ("code", code),
         ("strategy_name", strategy_name),
         ("period", period),
         ("status", status),
-    ):
-        if value is not None:
-            conditions.append(f"{column} = ?")
-            params.append(value)
+    ))
 
     sql = f"SELECT {', '.join(_LIST_COLUMNS)} FROM walkforward_runs"
-    if conditions:
-        sql += " WHERE " + " AND ".join(conditions)
+    if where_clause:
+        sql += " WHERE " + where_clause
     sql += " ORDER BY created_at DESC"
 
     conn = sqlite3.connect(str(db_path))
