@@ -45,6 +45,8 @@ __all__ = [
     "load_compare_result",
     "list_compare_results",
     "search_compare_results",
+    "delete_runner_result",
+    "delete_compare_result",
 ]
 
 #: デフォルトのSQLiteデータベースファイルパス。
@@ -82,6 +84,9 @@ INSERT INTO walkforward_compares (
 """
 
 _SELECT_COMPARE_RAW_JSON_SQL = "SELECT raw_json FROM walkforward_compares WHERE compare_run_id = ?"
+
+_DELETE_RUNNER_RESULT_SQL = "DELETE FROM walkforward_runs WHERE run_id = ?"
+_DELETE_COMPARE_RESULT_SQL = "DELETE FROM walkforward_compares WHERE compare_run_id = ?"
 
 #: search_compare_results() / list_compare_results() 共通のSELECT対象列。
 #: raw_jsonは一覧・検索いずれの結果にも含めない
@@ -404,6 +409,60 @@ def search_compare_results(
         conn.close()
 
     return [dict(zip(_LIST_COMPARE_COLUMNS, row)) for row in rows]
+
+
+def delete_runner_result(
+    run_id: str,
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> bool:
+    """run_idに対応するRunnerResultレコードを削除する。
+
+    削除のみを行い、RunnerResultの解析・JSON加工・Status変更・集計・
+    ランキング等は一切行わない。対象が存在しない場合も例外は送出せず、
+    Falseを返すだけとする。
+
+    Args:
+        run_id: 削除対象のrun_id。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        True: レコードが削除された場合。
+        False: 対象のrun_idが存在せず、何も削除されなかった場合。
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute(_DELETE_RUNNER_RESULT_SQL, (run_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_compare_result(
+    compare_run_id: str,
+    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+) -> bool:
+    """compare_run_idに対応するStrategyCompareResultレコードを削除する。
+
+    削除のみを行い、Compare内容の解析・JSON加工・Status変更・集計・
+    ランキング等は一切行わない。対象が存在しない場合も例外は送出せず、
+    Falseを返すだけとする（delete_runner_result()と対称の設計）。
+
+    Args:
+        compare_run_id: 削除対象のcompare_run_id。
+        db_path: SQLiteデータベースファイルのパス。
+
+    Returns:
+        True: レコードが削除された場合。
+        False: 対象のcompare_run_idが存在せず、何も削除されなかった場合。
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cursor = conn.execute(_DELETE_COMPARE_RESULT_SQL, (compare_run_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def list_runner_results(
