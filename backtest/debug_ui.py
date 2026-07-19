@@ -2147,51 +2147,65 @@ def render_walkforward_history_table(history_rows: list[dict]) -> None:
     戻り値）を表として描画する共通関数。全件表示・検索結果表示の
     両方から呼ばれ、一覧生成コードを重複させない。
 
-    各行の「📂 読み込む」ボタンが押された時のみ
-    walkforward_storage.load_runner_result(run_id) を呼び、取得した
-    RunnerResultを _SS_KEY_WF_HISTORY_VIEW へ保存する（表示は
-    呼び出し元の render_walkforward_history_section() が担う）。
-    
-    Phase5で保存日時・実行時間・Runner Schema Versionの3列を追加した。
-    いずれもwalkforward_storage側が返す既存の値をそのまま表示するだけで、
+    Phase11で、Strategy Compare履歴用に作った汎用テーブル描画ヘルパー
+    render_history_table_generic()（Phase9）へ実装を委譲する形へ整理した
+    （Runner履歴・Compare履歴で別々に持っていた表描画・ボタン生成コードの
+    重複を解消）。表示される列・値・ボタンの挙動はPhase10までと同一。
+    walkforward_storage側が返す既存の値をそのまま表示するだけで、
     このファイル内で計算・加工は行わない。
     """
-    header_cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1, 1])
-    for col, label in zip(
-        header_cols,
-        ["保存日時", "銘柄", "戦略", "期間", "Status", "実行時間(秒)", "Schema Ver.", "", ""],
-    ):
-        col.markdown(f"**{label}**")
+    # elapsed_secondsのみ、既存の_fmt()による表示整形（小数点2桁）を保つ
+    # ため、汎用ヘルパーへ渡す前に文字列化しておく（generic側は値の
+    # 加工を一切行わないため、整形はここで済ませる）。
+    display_rows = [
+        {**row, "elapsed_seconds": _fmt(row.get("elapsed_seconds"))}
+        for row in history_rows
+    ]
+    columns = [
+        ("created_at", "保存日時"),
+        ("code", "銘柄"),
+        ("strategy_name", "戦略"),
+        ("period", "期間"),
+        ("status", "Status"),
+        ("elapsed_seconds", "実行時間(秒)"),
+        ("runner_schema_version", "Schema Ver."),
+    ]
 
-    for row in history_rows:
-        cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1, 1])
-        cols[0].caption(row.get("created_at") or "―")
-        cols[1].caption(row.get("code") or "―")
-        cols[2].caption(row.get("strategy_name") or "―")
-        cols[3].caption(row.get("period") or "―")
-        cols[4].caption(row.get("status") or "―")
-        cols[5].caption(_fmt(row.get("elapsed_seconds")))
-        cols[6].caption(row.get("runner_schema_version") or "―")
-        with cols[7]:
-            if st.button("📂 読み込む", key=f"wf_history_load_{row.get('run_id')}"):
-                try:
-                    loaded_result = load_runner_result(row.get("run_id"))
-                    st.session_state[_SS_KEY_WF_HISTORY_VIEW] = loaded_result
-                    st.session_state[_SS_KEY_WF_HISTORY_VIEW_META] = row
-                except Exception:
-                    st.error("❌ 履歴の読込中にエラーが発生しました。")
-                    st.code(traceback.format_exc(), language="text")
-        with cols[8]:
-            if st.button("🗑 削除", key=f"wf_history_delete_{row.get('run_id')}"):
-                try:
-                    deleted = delete_runner_result(row.get("run_id"))
-                    if deleted:
-                        st.success(f"✅ 削除しました（run_id: {row.get('run_id')}）")
-                    else:
-                        st.info("ℹ️ 対象の履歴が見つかりませんでした。")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"❌ 削除中にエラーが発生しました: {type(exc).__name__}: {exc}")
+    def _on_load(row: dict) -> None:
+        # _SS_KEY_WF_HISTORY_VIEW_METAには元の（未整形の）行を保存し、
+        # 表示専用の整形（elapsed_secondsの文字列化）を情報として
+        # 引き継がないようにする。
+        original_row = next(
+            r for r in history_rows if r.get("run_id") == row.get("run_id")
+        )
+        try:
+            loaded_result = load_runner_result(row.get("run_id"))
+            st.session_state[_SS_KEY_WF_HISTORY_VIEW] = loaded_result
+            st.session_state[_SS_KEY_WF_HISTORY_VIEW_META] = original_row
+        except Exception:
+            st.error("❌ 履歴の読込中にエラーが発生しました。")
+            st.code(traceback.format_exc(), language="text")
+
+    def _on_delete(row: dict) -> None:
+        try:
+            deleted = delete_runner_result(row.get("run_id"))
+            if deleted:
+                st.success(f"✅ 削除しました（run_id: {row.get('run_id')}）")
+            else:
+                st.info("ℹ️ 対象の履歴が見つかりませんでした。")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"❌ 削除中にエラーが発生しました: {type(exc).__name__}: {exc}")
+
+    render_history_table_generic(
+        rows=display_rows,
+        columns=columns,
+        id_key="run_id",
+        load_button_key_prefix="wf_history_load",
+        on_load=_on_load,
+        delete_button_key_prefix="wf_history_delete",
+        on_delete=_on_delete,
+    )
 
 def render_walkforward_history_view_meta() -> None:
     """
