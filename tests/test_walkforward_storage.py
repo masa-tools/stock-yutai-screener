@@ -23,6 +23,8 @@ from backtest.walkforward_storage import (
     load_compare_result,
     list_compare_results,
     search_compare_results,
+    delete_runner_result,
+    delete_compare_result,
 )
 
 
@@ -489,3 +491,52 @@ def test_search_compare_results_does_not_include_raw_json(db_path):
     _seed_compare_search_fixture(db_path)
     rows = search_compare_results(code="7203", db_path=db_path)
     assert all("raw_json" not in r for r in rows)
+
+
+# ════════════════════════════════════════════════
+# 履歴削除のテスト（Phase10）
+# ════════════════════════════════════════════════
+def test_delete_runner_result_success(db_path):
+    """保存済みRunnerResultを削除すると、Trueが返る。"""
+    initialize_database(db_path)
+    save_runner_result(_dummy_runner_result("run-to-delete"), db_path=db_path)
+
+    assert delete_runner_result("run-to-delete", db_path=db_path) is True
+
+
+def test_delete_runner_result_nonexistent_id_returns_false(db_path):
+    """存在しないrun_idを削除しようとしてもFalseが返り、例外にならない。"""
+    initialize_database(db_path)
+    assert delete_runner_result("does-not-exist", db_path=db_path) is False
+
+
+def test_load_after_delete_runner_result_returns_none(db_path):
+    """削除後、load_runner_result()はNoneを返す。"""
+    initialize_database(db_path)
+    save_runner_result(_dummy_runner_result("run-to-delete-2"), db_path=db_path)
+    delete_runner_result("run-to-delete-2", db_path=db_path)
+
+    assert load_runner_result("run-to-delete-2", db_path=db_path) is None
+
+
+def test_delete_compare_result_success(db_path):
+    """保存済みStrategyCompareResultを削除すると、Trueが返る。"""
+    initialize_database(db_path)
+    save_compare_result(_dummy_compare_result("compare-to-delete"), db_path=db_path)
+
+    assert delete_compare_result("compare-to-delete", db_path=db_path) is True
+
+
+def test_delete_compare_result_nonexistent_id_returns_false(db_path):
+    """存在しないcompare_run_idを削除しようとしてもFalseが返り、例外にならない。"""
+    initialize_database(db_path)
+    assert delete_compare_result("does-not-exist", db_path=db_path) is False
+
+
+def test_load_after_delete_compare_result_returns_none(db_path):
+    """削除後、load_compare_result()はNoneを返す。"""
+    initialize_database(db_path)
+    save_compare_result(_dummy_compare_result("compare-to-delete-2"), db_path=db_path)
+    delete_compare_result("compare-to-delete-2", db_path=db_path)
+
+    assert load_compare_result("compare-to-delete-2", db_path=db_path) is None
