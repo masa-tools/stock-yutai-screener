@@ -2347,8 +2347,7 @@ def render_walkforward_compare_history_search_form() -> None:
         st.session_state[_SS_KEY_WF_COMPARE_HISTORY_FILTERS] = None
 
 
-def render_history_table_generic(rows, columns, id_key, load_button_key_prefix, on_load) -> None:
-    def render_history_table_generic(
+def render_history_table_generic(
     rows, columns, id_key, load_button_key_prefix, on_load,
     delete_button_key_prefix=None, on_delete=None,
 ) -> None:
