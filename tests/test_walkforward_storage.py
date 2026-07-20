@@ -540,3 +540,55 @@ def test_load_after_delete_compare_result_returns_none(db_path):
     delete_compare_result("compare-to-delete-2", db_path=db_path)
 
     assert load_compare_result("compare-to-delete-2", db_path=db_path) is None
+
+
+# ════════════════════════════════════════════════
+# Critical-1 回帰防止テスト（Phase12）
+# ════════════════════════════════════════════════
+# 以下のテストは、他の全テストと異なり initialize_database(db_path) を
+# 事前に一切呼ばない。これは実運用（debug_ui.pyがinitialize_database()を
+# 明示的に呼ばずにStorage関数へ到達しうる状況）を再現し、
+# "no such table" エラーが発生しないことを保証するためのものである。
+
+def test_save_runner_result_without_prior_initialize(db_path):
+    """initialize_database()を事前に呼ばなくても、保存が自己修復して成功する。"""
+    saved_id = save_runner_result(_dummy_runner_result("run-no-init"), db_path=db_path)
+    assert saved_id == "run-no-init"
+
+
+def test_list_runner_results_without_prior_initialize(db_path):
+    """DB未初期化状態でlist_runner_results()を呼んでもOperationalErrorにならず、空リストが返る。"""
+    assert list_runner_results(db_path=db_path) == []
+
+
+def test_search_runner_results_without_prior_initialize(db_path):
+    assert search_runner_results(code="7203", db_path=db_path) == []
+
+
+def test_load_runner_result_without_prior_initialize(db_path):
+    assert load_runner_result("does-not-exist", db_path=db_path) is None
+
+
+def test_delete_runner_result_without_prior_initialize(db_path):
+    assert delete_runner_result("does-not-exist", db_path=db_path) is False
+
+
+def test_save_compare_result_without_prior_initialize(db_path):
+    saved_id = save_compare_result(_dummy_compare_result("compare-no-init"), db_path=db_path)
+    assert saved_id == "compare-no-init"
+
+
+def test_list_compare_results_without_prior_initialize(db_path):
+    assert list_compare_results(db_path=db_path) == []
+
+
+def test_search_compare_results_without_prior_initialize(db_path):
+    assert search_compare_results(code="7203", db_path=db_path) == []
+
+
+def test_load_compare_result_without_prior_initialize(db_path):
+    assert load_compare_result("does-not-exist", db_path=db_path) is None
+
+
+def test_delete_compare_result_without_prior_initialize(db_path):
+    assert delete_compare_result("does-not-exist", db_path=db_path) is False
