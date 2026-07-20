@@ -56,6 +56,12 @@ DEFAULT_DB_PATH = "walkforward.db"
 #: Migration管理用テーブル。1行=1つの「適用済みversion」を表す
 #: 単純な履歴テーブル（Migration履歴UIではなく、内部状態管理のみ）。
 _CREATE_SCHEMA_VERSION_TABLE_SQL = """
+#: walkforward_schema_versionテーブルの作成SQL。
+#: 【注意】このテーブル自体は _MIGRATIONS のバージョン管理対象では
+#: ない（「バージョン管理の仕組み自体」を作るためのテーブルのため、
+#: 循環を避けて initialize_database() の冒頭で無条件に
+#: CREATE TABLE IF NOT EXISTS している）。version 1/2/3 と混同しないこと。
+_CREATE_SCHEMA_VERSION_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS walkforward_schema_version (
     version INTEGER PRIMARY KEY
 )
@@ -128,6 +134,10 @@ _SELECT_LIST_SQL = """
 -- list_runner_results()/search_runner_results()双方のSQLは変更不要。
 """
 _LIST_COLUMNS = (
+#: Runner側のsearch/list共通SELECT対象列。
+#: Compare側の _LIST_COMPARE_COLUMNS と対になる命名へ統一
+#: （Phase11監査で指摘された非対称な命名を解消。値・並び順は無変更）。
+_RUNNER_LIST_COLUMNS = (
     "run_id", "code", "strategy_name", "period", "status",
     "started_at", "finished_at", "elapsed_seconds",
     "runner_schema_version", "created_at",
@@ -171,6 +181,21 @@ def _ensure_initialized(db_path: Union[str, Path]) -> None:
     いても、Storage層の入口で自己修復することで
     "no such table" エラーを防ぐ。Migration設計・スキーマ・公開APIの
     シグネチャは一切変更していない。
+    
+    【なぜinitialize_database()を直接呼ばず、この薄いラッパーを
+    挟んでいるか】
+    現時点ではinitialize_database(db_path)を呼ぶだけで、追加のロジックは
+    無い。それでも別関数として独立させているのは、
+      (a) 「各エントリポイントが自己修復する」という意図を関数名で
+          明示するため（initialize_database()の呼び出し箇所を見ても、
+          それが「明示的な初期化」なのか「防御的な保証」なのか区別が
+          つかないため）、
+      (b) 将来、呼び出し頻度を減らす最適化（例:
+          プロセス内で一度成功したら再チェックしない、といった
+          キャッシュ）が必要になった場合に、呼び出し元（6箇所）を
+          一切変更せずこの関数の中身だけを変更できるようにするため。
+    今回はその最適化を実装しない（禁止事項の「キャッシュ追加」に該当する
+    ため）。あくまで将来の変更点を1箇所に閉じ込めるための構造。
     """
     initialize_database(db_path)
 
@@ -663,7 +688,7 @@ def search_runner_results(
     判定ロジックは一切行わない（単純な完全一致検索のみ）。
 
     Args:
-        code: 完全一致させる銘柄コード。
+        code: 完全一致させる銘柄コード（部分一致・LIKE検索ではない）。
         strategy_name: 完全一致させる戦略名。
         period: 完全一致させる期間文字列（例: "1y"）。
         status: 完全一致させるstatus（"SUCCESS"等）。
@@ -683,7 +708,7 @@ def search_runner_results(
         ("status", status),
     ))
 
-    sql = f"SELECT {', '.join(_LIST_COLUMNS)} FROM walkforward_runs"
+    sql = f"SELECT {', '.join(_RUNNER_LIST_COLUMNS)} FROM walkforward_runs"
     if where_clause:
         sql += " WHERE " + where_clause
     sql += " ORDER BY created_at DESC"
@@ -694,7 +719,7 @@ def search_runner_results(
     finally:
         conn.close()
 
-    return [dict(zip(_LIST_COLUMNS, row)) for row in rows]
+    return [dict(zip(_RUNNER_LIST_COLUMNS, row)) for row in rows]
 
 
 # ════════════════════════════════════════════════
