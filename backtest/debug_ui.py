@@ -1588,7 +1588,6 @@ def render_walkforward_validation_section(meta: dict) -> None:
     render_walkforward_strategy_compare_section(wf_code, wf_period_label, wf_period_code, wf_dry_run)
 
 
-def render_walkforward_runner_result(result: dict) -> None:
 def render_walkforward_runner_result(result: dict, show_save_button: bool = True) -> None:
     """
     walkforward_runner.run_walkforward_runner() の戻り値をそのまま表示する。
