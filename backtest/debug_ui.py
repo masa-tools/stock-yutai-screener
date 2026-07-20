@@ -121,6 +121,7 @@ from backtest.walkforward_ranking import build_walkforward_ranking, extract_rank
 from backtest.walkforward_export import build_walkforward_csv_exports
 from backtest.walkforward_storage import (
     save_runner_result,
+    save_compare_result,
     list_runner_results,
     search_runner_results,
     load_runner_result,
@@ -1588,12 +1589,21 @@ def render_walkforward_validation_section(meta: dict) -> None:
 
 
 def render_walkforward_runner_result(result: dict) -> None:
+def render_walkforward_runner_result(result: dict, show_save_button: bool = True) -> None:
     """
     walkforward_runner.run_walkforward_runner() の戻り値をそのまま表示する。
 
     このファイルはデータ加工を一切行わず、渡されたdictの中身も
     書き換えない（get()による読み取りのみ）。
 
+    Args:
+        result: run_walkforward_runner() の戻り値。
+        show_save_button: 「💾 SQLiteへ保存」ボタンを表示するか。
+            Strategy Compareの戦略別詳細表示（各戦略のRunnerResultが
+            同一run_idを共有する）から呼ばれる場合はFalseを指定する
+            （Critical-2対応）。この結果自体はCritical-3で追加した
+            Compare専用の保存ボタン経由でまとめて保存される。
+            デフォルトはTrue（既存の単独実行結果表示の挙動を維持）。
    【修正メモ】戻り値に"dry_run"キーは存在しないため、Dry Run実施の
     判定は stage_status["benchmark"] が "SKIPPED" かどうかで行う
     （実ファイル監査で判明した仕様に合わせた読み取り方法の変更のみ。
@@ -1665,6 +1675,9 @@ def render_walkforward_runner_result(result: dict) -> None:
     st.divider()
     render_walkforward_csv_export(result)
 
+    st.divider()
+    if show_save_button:
+        render_walkforward_save_button(result)
 
 def _format_stage_message(entry) -> str:
     """
@@ -2009,7 +2022,11 @@ def render_walkforward_compare_result_body(compare_result: dict) -> None:
     with st.expander("戦略別 詳細結果"):
         for name, runner_result in strategies_result.items():
             st.markdown(f"##### {STRATEGY_REGISTRY.get(name, {}).get('label', name)}")
-            render_walkforward_runner_result(runner_result)
+            # Strategy Compare配下の各戦略は同一run_idを共有するため、
+            # ここでは個別のRunner保存ボタンを表示しない（Critical-2対応）。
+            # 保存したい場合はCompare結果全体をCompare専用の保存ボタン
+            # （render_walkforward_compare_save_button）から保存する。
+            render_walkforward_runner_result(runner_result, show_save_button=False)
             st.divider()
 
 
@@ -2308,6 +2325,9 @@ def render_walkforward_compare_history_section() -> None:
         st.markdown("#### 📂 読み込んだStrategy Compare履歴の内容")
         render_walkforward_compare_result_body(history_view_result)
 
+    st.divider()
+    render_walkforward_compare_save_button(compare_result)
+
 
 def render_walkforward_compare_history_search_form() -> None:
     """
@@ -2397,3 +2417,32 @@ def render_history_table_generic(
             with cols[-1]:
                 if st.button("🗑 削除", key=f"{delete_button_key_prefix}_{row.get(id_key)}"):
                     on_delete(row)
+
+
+# ════════════════════════════════════════════════
+# Strategy Compare結果のSQLite保存ボタン（Critical-3対応）
+# ════════════════════════════════════════════════
+def render_walkforward_compare_save_button(compare_result: dict) -> None:
+    """
+    現在表示中のStrategy Compare結果（StrategyCompareResult）を
+    SQLiteへ保存するボタンを表示する。
+
+    walkforward_storage.save_compare_result()（無変更）を呼ぶだけの
+    独立した保存経路であり、Runner単体の保存
+    （render_walkforward_save_button）とは責務を混在させない。
+    compare_result["run_id"]をprimary keyとして
+    walkforward_comparesテーブルへ保存するため、各戦略のRunnerResult
+    （同一run_idを共有する。Critical-2参照）を個別保存する経路とは
+    テーブルもキーも独立しており衝突しない。
+
+    Args:
+        compare_result: run_walkforward_strategy_compare() の戻り値。
+    """
+    if st.button("💾 Compare結果をSQLiteへ保存", key="wf_compare_save_to_sqlite_button"):
+        try:
+            saved_id = save_compare_result(compare_result)
+            st.success(f"✅ 保存しました（compare_run_id: {saved_id}）")
+        except sqlite3.IntegrityError:
+            st.warning("⚠️ このCompare結果（compare_run_id）は既に保存済みです。上書きは行われません。")
+        except Exception as exc:
+            st.error(f"❌ 保存中にエラーが発生しました: {type(exc).__name__}: {exc}")
