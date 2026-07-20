@@ -159,6 +159,22 @@ def _migrate_v3(conn: sqlite3.Connection) -> None:
     conn.execute(_MIGRATION_V3_SQL)
 
 
+def _ensure_initialized(db_path: Union[str, Path]) -> None:
+    """
+    各公開関数が呼ばれる前に、DBが初期化済みであることを保証する
+    （Critical-1対応）。
+
+    initialize_database()自体は無変更・完全に冪等（テーブルが既に
+    存在すればCREATE TABLE IF NOT EXISTSは何もせず、Migrationも
+    未適用分のみ適用する）ため、この関数を何度呼んでも安全である。
+    アプリ起動経路（debug_ui.py）がinitialize_database()を呼び忘れて
+    いても、Storage層の入口で自己修復することで
+    "no such table" エラーを防ぐ。Migration設計・スキーマ・公開APIの
+    シグネチャは一切変更していない。
+    """
+    initialize_database(db_path)
+
+
 # ════════════════════════════════════════════════
 # 共通ヘルパー（Phase11: SQL重複排除のためのリファクタリング）
 # ════════════════════════════════════════════════
@@ -178,6 +194,8 @@ def _fetch_raw_json(sql: str, param: str, db_path: Union[str, Path]) -> Optional
     Returns:
         該当行があればjson.loads()した辞書、無ければNone。
     """
+    _ensure_initialized(db_path)
+
     conn = sqlite3.connect(str(db_path))
     try:
         row = conn.execute(sql, (param,)).fetchone()
@@ -206,6 +224,8 @@ def _execute_delete(sql: str, param: str, db_path: Union[str, Path]) -> bool:
         True: 1件以上削除された場合。
         False: 対象が存在せず何も削除されなかった場合。
     """
+    _ensure_initialized(db_path)
+
     conn = sqlite3.connect(str(db_path))
     try:
         cursor = conn.execute(sql, (param,))
@@ -365,6 +385,7 @@ def save_runner_result(
     run_id = runner_result.get("run_id")
     if not run_id:
         raise ValueError("runner_result に run_id が含まれていません。")
+    _ensure_initialized(db_path)
 
     code, strategy_name, period = _extract_indexed_fields(runner_result)
     raw_json = json.dumps(runner_result, ensure_ascii=False)
@@ -464,6 +485,8 @@ def search_compare_results(
         [{"compare_run_id", "code", "period", "status", "created_at"}, ...]
         のリスト（created_at降順）。該当レコードが無い場合は空リスト。
     """
+    _ensure_initialized(db_path)
+
     where_clause, params = _build_where_clause((
         ("code", code),
         ("period", period),
@@ -580,6 +603,8 @@ def save_compare_result(
     if not compare_run_id:
         raise ValueError("compare_result に run_id が含まれていません。")
 
+    _ensure_initialized(db_path)
+
     raw_json = json.dumps(compare_result, ensure_ascii=False)
 
     conn = sqlite3.connect(str(db_path))
@@ -649,6 +674,8 @@ def search_runner_results(
         "started_at", "created_at"}, ...] のリスト（created_at降順）。
         該当レコードが無い場合は空リスト。
     """
+    _ensure_initialized(db_path)
+
     where_clause, params = _build_where_clause((
         ("code", code),
         ("strategy_name", strategy_name),
