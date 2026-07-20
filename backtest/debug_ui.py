@@ -1603,6 +1603,17 @@ def render_walkforward_runner_result(result: dict, show_save_button: bool = True
             （Critical-2対応）。この結果自体はCritical-3で追加した
             Compare専用の保存ボタン経由でまとめて保存される。
             デフォルトはTrue（既存の単独実行結果表示の挙動を維持）。
+
+    【重要・将来の変更時の注意】
+    show_save_button=False の呼び出し箇所（Strategy Compare配下）を
+    見て「保存ボタンが表示されないのはバグでは」と思っても、それは
+    意図的な仕様である（walkforward_runs.run_idがPRIMARY KEYであり、
+    Strategy Compare配下の全戦略が同一run_idを共有するため、個別保存
+    すると2件目以降が必ずIntegrityErrorになる。詳細はPhase12の
+    Critical-2対応を参照）。この関数へ新しい呼び出し元を追加する際は、
+    「その呼び出し元のresultは他の呼び出しとrun_idを共有し得るか」を
+    必ず確認し、共有し得る場合はshow_save_button=Falseを指定すること。
+
    【修正メモ】戻り値に"dry_run"キーは存在しないため、Dry Run実施の
     判定は stage_status["benchmark"] が "SKIPPED" かどうかで行う
     （実ファイル監査で判明した仕様に合わせた読み取り方法の変更のみ。
