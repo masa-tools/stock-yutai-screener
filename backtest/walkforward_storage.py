@@ -55,7 +55,6 @@ DEFAULT_DB_PATH = "walkforward.db"
 
 #: Migration管理用テーブル。1行=1つの「適用済みversion」を表す
 #: 単純な履歴テーブル（Migration履歴UIではなく、内部状態管理のみ）。
-_CREATE_SCHEMA_VERSION_TABLE_SQL = """
 #: walkforward_schema_versionテーブルの作成SQL。
 #: 【注意】このテーブル自体は _MIGRATIONS のバージョン管理対象では
 #: ない（「バージョン管理の仕組み自体」を作るためのテーブルのため、
