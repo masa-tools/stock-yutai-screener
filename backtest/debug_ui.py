@@ -2476,7 +2476,12 @@ def render_walkforward_compare_save_button(compare_result: dict) -> None:
 def render_walkforward_analysis_dashboard(named_results: dict) -> None:
     """
     現在メモリ上に存在するRunnerResult（単体、または複数戦略分）を分析する、
-    読み取り専用のダッシュボード。
+    読み取り専用のダッシュボード。データ抽出（_filter_dashboard_results /
+    _build_dashboard_comparison_rows）と描画（本関数 /
+    _render_dashboard_window_sections）を分離しており、本関数自体は
+    「フィルタ→ランキング算出→比較表描画→Window推移描画」という
+    4ステップを順に呼び出すだけのオーケストレーターに限定している
+    （Phase14レビューによるリファクタリング）。
 
     SQLiteへのアクセス（load_runner_result / search_runner_results等の
     呼び出し）は一切行わない。呼び出し側が既に取得済みのRunnerResultを
@@ -2498,7 +2503,7 @@ def render_walkforward_analysis_dashboard(named_results: dict) -> None:
         named_results: {戦略名（または任意の識別ラベル）: RunnerResult}
             のマッピング。値がNoneまたは空の要素は無視する。
     """
-    valid_results = {name: r for name, r in named_results.items() if r}
+    valid_results = _filter_dashboard_results(named_results)
     if not valid_results:
         return
 
@@ -2515,6 +2520,52 @@ def render_walkforward_analysis_dashboard(named_results: dict) -> None:
     ranking = build_walkforward_ranking(valid_results)
 
     st.markdown("#### 📋 比較表")
+    rows = _build_dashboard_comparison_rows(valid_results, ranking)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    _render_dashboard_window_sections(valid_results)
+
+
+def _filter_dashboard_results(named_results: dict) -> dict:
+    """
+    Dashboardの入力から、値がNoneまたは空のエントリを除いた辞書を返す。
+
+    表示（Streamlit呼び出し）を一切含まない純粋なフィルタ処理のため、
+    将来Phase14B（履歴横断Dashboard）等、表示以外の文脈からも
+    再利用できる。
+    """
+    return {name: r for name, r in named_results.items() if r}
+
+
+def _dashboard_strategy_label(name: str) -> str:
+    """
+    戦略名（STRATEGY_REGISTRYのキー）を表示用ラベルへ変換する。
+
+    比較表の行・Window推移セクションの見出しの両方で同じ解決処理が
+    必要だったため、この1箇所へ集約した（重複排除）。
+    STRATEGY_REGISTRYに存在しないキーの場合はnameをそのまま返す。
+    """
+    return STRATEGY_REGISTRY.get(name, {}).get("label", name)
+
+
+def _build_dashboard_comparison_rows(valid_results: dict, ranking: dict) -> list[dict]:
+    """
+    Dashboardの比較表（カード2相当）に表示する行データを組み立てる。
+
+    Streamlit呼び出しを一切含まない純粋なデータ構築関数とすることで、
+    将来Phase14B（履歴横断Dashboard）やCSV出力等、表示以外の用途からも
+    そのまま再利用できるようにしている。walkforward_ranking.py（既存・
+    無変更）が算出済みの値、およびsummary配下の既存キーを読むだけで、
+    新しい評価ロジック・計算式は一切追加しない。
+
+    Args:
+        valid_results: _filter_dashboard_results() で不正値を除いた
+            {戦略名: RunnerResult} のマッピング。
+        ranking: build_walkforward_ranking(valid_results) の戻り値。
+
+    Returns:
+        pandas.DataFrame化できる行dictのリスト。
+    """
     rows = []
     for name, runner_result in valid_results.items():
         metrics = ranking["metrics"].get(name) or extract_ranking_metrics(runner_result)
@@ -2523,7 +2574,7 @@ def render_walkforward_analysis_dashboard(named_results: dict) -> None:
         trend = summary.get("improvement_trend") or {}
 
         rows.append({
-            "戦略": STRATEGY_REGISTRY.get(name, {}).get("label", name),
+            "戦略": _dashboard_strategy_label(name),
             "Status": runner_result.get("status"),
             "Health": metrics.get("health_check_level"),
             "Health Score": metrics.get("health_check_score"),
@@ -2533,12 +2584,19 @@ def render_walkforward_analysis_dashboard(named_results: dict) -> None:
             "平均最大DD(%)": (metric_stats.get("max_dd") or {}).get("mean"),
             "Improvement Trend": trend.get("trend"),
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    return rows
 
+
+def _render_dashboard_window_sections(valid_results: dict) -> None:
+    """
+    戦略ごとのWindow別推移セクション（カード内でのexpander群）を描画する。
+
+    既存のrender_walkforward_window_charts()（無変更）をそのまま
+    呼び出すだけで、新しいグラフ描画コードは持たない。
+    """
     st.markdown("#### 📈 Window別推移（戦略ごと）")
+    single = len(valid_results) == 1
     for name, runner_result in valid_results.items():
-        label = STRATEGY_REGISTRY.get(name, {}).get("label", name)
-        with st.expander(f"{label} のWindow別推移", expanded=(len(valid_results) == 1)):
-            # 既存のWindow可視化関数をそのまま再利用する（新しいグラフ
-            # 描画コードは書かない）。
+        label = _dashboard_strategy_label(name)
+        with st.expander(f"{label} のWindow別推移", expanded=single):
             render_walkforward_window_charts(runner_result.get("summary"))
