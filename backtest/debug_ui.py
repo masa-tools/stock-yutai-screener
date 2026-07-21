@@ -1583,6 +1583,10 @@ def render_walkforward_validation_section(meta: dict) -> None:
         )
     else:
         render_walkforward_runner_result(result)
+        # 現在表示中のRunnerResultをそのままDashboardへ渡す。
+        # SQLiteへの追加アクセスは発生しない（Phase14A）。
+        dashboard_strategy_key = (result.get("pipeline") or {}).get("strategy") or wf_strategy_key
+        render_walkforward_analysis_dashboard({dashboard_strategy_key: result})
 
     st.divider()
     render_walkforward_strategy_compare_section(wf_code, wf_period_label, wf_period_code, wf_dry_run)
@@ -2039,6 +2043,11 @@ def render_walkforward_compare_result_body(compare_result: dict) -> None:
             render_walkforward_runner_result(runner_result, show_save_button=False)
             st.divider()
 
+    # strategies_result（既にメモリ上にある複数戦略分のRunnerResult）を
+    # そのままDashboardへ渡す。本関数はライブ実行表示・Compare履歴表示の
+    # 両方から共有されているため、ここへ1箇所追加するだけで両経路を
+    # カバーできる。SQLiteへの追加アクセスは発生しない（Phase14A）。
+    render_walkforward_analysis_dashboard(strategies_result)
 
 def render_walkforward_ranking_tables(ranking: dict) -> None:
     """
@@ -2119,7 +2128,11 @@ def render_walkforward_history_section() -> None:
         st.markdown("#### 📂 読み込んだ履歴の内容")
         render_walkforward_history_view_meta()
         render_walkforward_runner_result(history_view_result)
-
+        # 履歴から読み込んだRunnerResult（既にメモリ上にある値）を
+        # そのままDashboardへ渡す。load_runner_result()の再呼び出しは
+        # 行わない（Phase14A）。
+        history_strategy_key = (history_view_result.get("pipeline") or {}).get("strategy") or "読込済み結果"
+        render_walkforward_analysis_dashboard({history_strategy_key: history_view_result})
 
 def render_walkforward_history_search_form() -> None:
     """
@@ -2456,3 +2469,76 @@ def render_walkforward_compare_save_button(compare_result: dict) -> None:
             st.warning("⚠️ このCompare結果（compare_run_id）は既に保存済みです。上書きは行われません。")
         except Exception as exc:
             st.error(f"❌ 保存中にエラーが発生しました: {type(exc).__name__}: {exc}")
+
+# ════════════════════════════════════════════════
+# Walk Forward Analysis Dashboard（Phase14A。完全に読み取り専用）
+# ════════════════════════════════════════════════
+def render_walkforward_analysis_dashboard(named_results: dict) -> None:
+    """
+    現在メモリ上に存在するRunnerResult（単体、または複数戦略分）を分析する、
+    読み取り専用のダッシュボード。
+
+    SQLiteへのアクセス（load_runner_result / search_runner_results等の
+    呼び出し）は一切行わない。呼び出し側が既に取得済みのRunnerResultを
+    {戦略名: RunnerResult} という形のdictへ包んで渡すだけであり、この
+    関数自体は「単体表示か複数比較か」を判定・分岐しない（呼び出し側の
+    3箇所が、単体の場合は1要素dict、Strategy Compareの場合は
+    compare_result["strategies"]をそのまま渡すことで正規化している）。
+
+    比較表・Health/Stability/Improvement Trendの抽出は、既存の
+    walkforward_ranking.build_walkforward_ranking()（無変更）をそのまま
+    利用し、新しい評価ロジック・計算式は一切追加しない。Window別推移
+    グラフも既存の render_walkforward_window_charts()（無変更）を
+    そのまま呼び出すだけで、新しいグラフ描画コードは書かない。
+
+    保存ボタン・削除ボタン・検索フォームは持たない。既存のRunner表示・
+    Compare表示・履歴表示・保存・削除・検索の各機能には一切影響しない。
+
+    Args:
+        named_results: {戦略名（または任意の識別ラベル）: RunnerResult}
+            のマッピング。値がNoneまたは空の要素は無視する。
+    """
+    valid_results = {name: r for name, r in named_results.items() if r}
+    if not valid_results:
+        return
+
+    st.markdown("### 📊 Walk Forward Analysis Dashboard")
+    st.caption(
+        "現在表示中の結果を分析する読み取り専用ビューです。"
+        "SQLiteへの新たなアクセスは行いません（既に取得済みの結果を表示するだけです）。"
+    )
+
+    # 抽出処理の二重実装を避けるため、build_walkforward_ranking()を
+    # 1回だけ呼び出し、その"metrics"を比較表でそのまま利用する
+    # （Strategy Composeセクションが既に採用している設計と同じ方針。
+    # RC監査M-1対応の踏襲）。
+    ranking = build_walkforward_ranking(valid_results)
+
+    st.markdown("#### 📋 比較表")
+    rows = []
+    for name, runner_result in valid_results.items():
+        metrics = ranking["metrics"].get(name) or extract_ranking_metrics(runner_result)
+        summary = runner_result.get("summary") or {}
+        metric_stats = summary.get("metric_statistics") or {}
+        trend = summary.get("improvement_trend") or {}
+
+        rows.append({
+            "戦略": STRATEGY_REGISTRY.get(name, {}).get("label", name),
+            "Status": runner_result.get("status"),
+            "Health": metrics.get("health_check_level"),
+            "Health Score": metrics.get("health_check_score"),
+            "Stability Score": metrics.get("stability_score"),
+            "平均リターン(%)": (metric_stats.get("avg_return") or {}).get("mean"),
+            "勝率(%)": (metric_stats.get("win_rate") or {}).get("mean"),
+            "平均最大DD(%)": (metric_stats.get("max_dd") or {}).get("mean"),
+            "Improvement Trend": trend.get("trend"),
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    st.markdown("#### 📈 Window別推移（戦略ごと）")
+    for name, runner_result in valid_results.items():
+        label = STRATEGY_REGISTRY.get(name, {}).get("label", name)
+        with st.expander(f"{label} のWindow別推移", expanded=(len(valid_results) == 1)):
+            # 既存のWindow可視化関数をそのまま再利用する（新しいグラフ
+            # 描画コードは書かない）。
+            render_walkforward_window_charts(runner_result.get("summary"))
