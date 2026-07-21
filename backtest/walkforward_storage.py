@@ -133,7 +133,6 @@ _SELECT_LIST_SQL = """
 -- SELECT対象列をこの1箇所に集約しているため、
 -- list_runner_results()/search_runner_results()双方のSQLは変更不要。
 """
-_LIST_COLUMNS = (
 #: Runner側のsearch/list共通SELECT対象列。
 #: Compare側の _LIST_COMPARE_COLUMNS と対になる命名へ統一
 #: （Phase11監査で指摘された非対称な命名を解消。値・並び順は無変更）。
