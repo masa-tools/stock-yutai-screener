@@ -207,6 +207,18 @@ _SS_KEY_WF_CACHE = "walkforward_runner_cache"
 # ようにする。新しいキャッシュ機構ではなく、既存のst.session_stateを
 # そのまま1スロット分利用するだけ。
 _SS_KEY_WF_HISTORY_VIEW = "walkforward_history_view_result"
+# Runner履歴一覧でのDashboard比較用チェック選択状態（Phase14B）。
+# 値は選択中のrun_idの集合（set[str]）。新しいキャッシュ機構ではなく、
+# 既存のst.session_stateを1スロット分利用するだけ。
+_SS_KEY_WF_DASHBOARD_SELECTION = "walkforward_dashboard_selected_run_ids"
+#: Phase14Bで定めた、Dashboardへ同時に渡せる履歴件数の上限。
+#: この上限はUI側のバリデーションのみで実現し、Storage層・
+#: render_walkforward_analysis_dashboard()には手を加えない。
+_WF_DASHBOARD_MAX_SELECTION = 10
+# 「📊 選択した履歴をDashboardで比較」ボタン押下時に組み立てた
+# named_resultsの保持スロット（Phase14B）。ボタンを再度押すまでは
+# 再描画のたびにload_runner_result()を再実行しない。
+_SS_KEY_WF_DASHBOARD_RESULT = "walkforward_dashboard_named_results"
 # 履歴一覧に適用中の検索条件（Phase4）。
 # None = 検索未適用（全件表示）。dict = search_runner_results()へ
 # そのまま渡す絞り込み条件。「🔍 検索」ボタン押下時のみ更新され、
@@ -2122,6 +2134,9 @@ def render_walkforward_history_section() -> None:
 
     render_walkforward_history_table(history_rows)
 
+    st.divider()
+    render_walkforward_history_dashboard_selector(history_rows)
+
     history_view_result = st.session_state.get(_SS_KEY_WF_HISTORY_VIEW)
     if history_view_result is not None:
         st.divider()
@@ -2187,6 +2202,14 @@ def render_walkforward_history_table(history_rows: list[dict]) -> None:
     戻り値）を表として描画する共通関数。全件表示・検索結果表示の
     両方から呼ばれ、一覧生成コードを重複させない。
 
+    Phase14Bで、各行に「📊 比較対象に追加」チェックボックスを追加した。
+    チェック状態は_SS_KEY_WF_DASHBOARD_SELECTIONへ保存するのみで、
+    ここではload_runner_result()を一切呼ばない（ロードはDashboard
+    比較ボタン押下時のみ、render_walkforward_history_dashboard_selector
+    が担当する）。
+    """
+    selected_run_ids: set = st.session_state.setdefault(_SS_KEY_WF_DASHBOARD_SELECTION, set())
+
     Phase11で、Strategy Compare履歴用に作った汎用テーブル描画ヘルパー
     render_history_table_generic()（Phase9）へ実装を委譲する形へ整理した
     （Runner履歴・Compare履歴で別々に持っていた表描画・ボタン生成コードの
@@ -2245,6 +2268,8 @@ def render_walkforward_history_table(history_rows: list[dict]) -> None:
         on_load=_on_load,
         delete_button_key_prefix="wf_history_delete",
         on_delete=_on_delete,
+        checkbox_key_prefix="wf_history_dashboard_check",
+        selected_ids=selected_run_ids,
     )
 
 def render_walkforward_history_view_meta() -> None:
@@ -2393,11 +2418,17 @@ def render_walkforward_compare_history_search_form() -> None:
 def render_history_table_generic(
     rows, columns, id_key, load_button_key_prefix, on_load,
     delete_button_key_prefix=None, on_delete=None,
+    checkbox_key_prefix=None, selected_ids=None,
 ) -> None:
     """
     「値の列＋読み込むボタン」という形の履歴テーブルを描画する汎用ヘルパー。
     delete_button_key_prefix/on_delete を指定した場合、「🗑 削除」ボタンも
     合わせて描画する（Phase10）。
+
+    checkbox_key_prefix/selected_ids を指定した場合、各行の先頭へ
+    比較選択用チェックボックスを描画する（Phase14B。Runner履歴のみが
+    この引数を渡すため、Compare履歴（引数を渡さない既存の呼び出し）の
+    表示には一切影響しない）。
 
     Strategy Compare履歴（render_walkforward_compare_history_section）が
     Runner履歴（render_walkforward_history_table）と同じ「行を並べて末尾に
@@ -2418,22 +2449,40 @@ def render_history_table_generic(
             （Noneの場合、削除ボタンは表示しない）。
         on_delete: 削除ボタンが押された時に呼ばれるコールバック
             （該当行のdictを1つ引数として受け取る）。
+        checkbox_key_prefix: チェックボックスのst.buttonキー接頭辞
+            （Noneの場合、チェックボックス列は表示しない）。
+        selected_ids: チェック状態を保持するset（id_keyの値の集合）。
+            チェックのON/OFFに応じてこのsetへ直接追加・削除する。
     """
     show_delete = delete_button_key_prefix is not None and on_delete is not None
-    widths = [2] + [1] * (len(columns) - 1) + [1] + ([1] if show_delete else [])
+    show_checkbox = checkbox_key_prefix is not None and selected_ids is not None
+    widths = ([1] if show_checkbox else []) + [2] + [1] * (len(columns) - 1) + [1] + ([1] if show_delete else [])
     header_cols = st.columns(widths)
+    offset = 1 if show_checkbox else 0
+    if show_checkbox:
+        header_cols[0].markdown("**比較**")
     for i, (_, label) in enumerate(columns):
-        header_cols[i].markdown(f"**{label}**")
-    header_cols[len(columns)].markdown("**読込**")
+        header_cols[offset + i].markdown(f"**{label}**")
+    header_cols[offset + len(columns)].markdown("**読込**")
     if show_delete:
         header_cols[-1].markdown("**削除**")
 
     for row in rows:
         cols = st.columns(widths)
+        if show_checkbox:
+            row_id = row.get(id_key)
+            checked = st.checkbox(
+                "", value=(row_id in selected_ids),
+                key=f"{checkbox_key_prefix}_{row_id}", label_visibility="collapsed",
+            )
+            if checked:
+                selected_ids.add(row_id)
+            else:
+                selected_ids.discard(row_id)
         for i, (key, _) in enumerate(columns):
             value = row.get(key)
-            cols[i].caption(value if value not in (None, "") else "―")
-        with cols[len(columns)]:
+            cols[offset + i].caption(value if value not in (None, "") else "―")
+        with cols[offset + len(columns)]:
             if st.button("📂 読み込む", key=f"{load_button_key_prefix}_{row.get(id_key)}"):
                 on_load(row)
         if show_delete:
@@ -2600,3 +2649,81 @@ def _render_dashboard_window_sections(valid_results: dict) -> None:
         label = _dashboard_strategy_label(name)
         with st.expander(f"{label} のWindow別推移", expanded=single):
             render_walkforward_window_charts(runner_result.get("summary"))
+
+
+# ════════════════════════════════════════════════
+# Runner履歴 → Dashboard比較（Phase14B。Compare履歴は対象外）
+# ════════════════════════════════════════════════
+def render_walkforward_history_dashboard_selector(history_rows: list[dict]) -> None:
+    """
+    Runner履歴一覧でチェック選択された行を、Walk Forward Analysis
+    Dashboard（render_walkforward_analysis_dashboard、Phase14A・無変更）
+    で横断比較するための導線。
+
+    「📊 選択した履歴をDashboardで比較」ボタンが押された時にのみ、
+    選択件数分だけ load_runner_result()（無変更）を呼び出し、
+    {表示名: RunnerResult} という形へ組み立てて
+    render_walkforward_analysis_dashboard() へそのまま渡す。
+    チェックボックスの選択操作自体ではロードを行わない
+    （render_walkforward_history_table 側のcheckbox処理を参照）。
+
+    表示名には run_id 単体ではなく、銘柄・戦略・保存日時を含める
+    （同一戦略を複数回保存していても一覧上・比較表上で区別できるように
+    するため）。
+
+    Compare履歴（render_walkforward_compare_history_section）は
+    このセクション・render_history_table_generic()のcheckbox機能
+    いずれからも一切変更していない。
+
+    Args:
+        history_rows: 現在表示中のRunner履歴一覧
+            （list_runner_results() または search_runner_results() の
+            戻り値）。選択中run_idに対応する行のメタ情報（銘柄・戦略・
+            保存日時）を表示名の組み立てに使う。
+    """
+    selected_run_ids: set = st.session_state.get(_SS_KEY_WF_DASHBOARD_SELECTION, set())
+    # 現在の一覧に含まれない（検索条件変更等で見えなくなった）run_idは
+    # 比較対象から自然に除外する。
+    visible_ids = {row.get("run_id") for row in history_rows}
+    active_selection = selected_run_ids & visible_ids
+
+    st.caption(f"📊 Dashboard比較用に選択中: {len(active_selection)}件（最大{_WF_DASHBOARD_MAX_SELECTION}件）")
+
+    if len(active_selection) > _WF_DASHBOARD_MAX_SELECTION:
+        st.warning(
+            f"⚠️ 選択件数が上限（{_WF_DASHBOARD_MAX_SELECTION}件）を超えています。"
+            f"Dashboardを表示するには、選択を{_WF_DASHBOARD_MAX_SELECTION}件以下に減らしてください。"
+        )
+        return
+
+    if not active_selection:
+        st.info("履歴一覧の「比較」列にチェックを入れると、複数の実行結果をDashboardで横断比較できます。")
+        return
+
+    if st.button("📊 選択した履歴をDashboardで比較", key="wf_history_dashboard_compare_button"):
+        rows_by_id = {row.get("run_id"): row for row in history_rows}
+        named_results: dict[str, dict] = {}
+        for run_id in active_selection:
+            try:
+                loaded = load_runner_result(run_id)
+            except Exception:
+                st.error(f"❌ run_id={run_id} の読込中にエラーが発生しました。")
+                st.code(traceback.format_exc(), language="text")
+                continue
+            if loaded is None:
+                continue
+
+            meta_row = rows_by_id.get(run_id, {})
+            display_name = (
+                f"{meta_row.get('code') or '?'} "
+                f"{meta_row.get('strategy_name') or '?'} "
+                f"({meta_row.get('created_at') or '?'})"
+            )
+            named_results[display_name] = loaded
+
+        st.session_state[_SS_KEY_WF_DASHBOARD_RESULT] = named_results
+
+    dashboard_named_results = st.session_state.get(_SS_KEY_WF_DASHBOARD_RESULT)
+    if dashboard_named_results:
+        st.divider()
+        render_walkforward_analysis_dashboard(dashboard_named_results)
