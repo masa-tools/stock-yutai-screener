@@ -1,6 +1,108 @@
 {
-  "schema_version": 1,
-  "research": {
-    "note": "Phase5-1時点では骨格のみ。本番 config/settings.json とは完全に別ファイルであり、本番設定には一切影響しません。研究用パラメータはPhase6以降、各テーマ実装時にここへ追加していきます。"
-  }
+  "theme": "rsi",
+  "phase": "Phase6-1",
+  "status": "research_preparation",
+  "note": "本ファイルは研究候補の定義のみを保持する。実験結果・勝率・リターン・採用判断はresearch/storage側で管理し、本ファイルには一切含めない。",
+
+  "scope": {
+    "primary": {
+      "target": "buy_timing_rsi_scoring_logic",
+      "description": "buy_timing.py相当のRSI買い時判定ロジック（5段階配点：15/12/8/5/2/0点）を研究用に独立複製したものを対象とする。Phase6の主目的である『買い時判定の投資成果改善』を直接検証する主対象。"
+    },
+    "secondary": {
+      "target": "investment_judge_rsi_reference",
+      "description": "investment_judge.py内のRSI_SLIGHTLY_OVERSOLD／RSI_OVERBOUGHT参照部分。閾値変更が最終投資判断側へ及ぼす影響を観測するのみとし、investment_judge自体のスコア構造（配点比率）は研究対象に含めない。"
+    },
+    "excluded": {
+      "target": "technical_analysis_display_rsi_notes",
+      "reason": "ユーザー向け表示・説明文言の生成が主目的であり、投資成果改善の検証対象としては性質が異なるため、Phase6では対象外とする。"
+    }
+  },
+
+  "candidates": [
+    {
+      "id": "A",
+      "name": "baseline",
+      "name_ja": "現行維持",
+      "thresholds": {
+        "oversold": 30,
+        "slightly_oversold": 40,
+        "neutral_low": 55,
+        "neutral_high": 65,
+        "overbought": 75
+      },
+      "hypothesis": "現行v8.1の閾値設定は既に一定の妥当性を持つ。他候補の比較基準（baseline）として機能する。",
+      "expected_effect": "比較の原点。改善効果はゼロと定義する。",
+      "expected_weakness": "現行設定自体に内在する弱点（該当があれば他候補との比較結果から逆算的に明らかになる）。"
+    },
+    {
+      "id": "B",
+      "name": "conservative",
+      "name_ja": "保守型",
+      "thresholds": {
+        "oversold": 25,
+        "slightly_oversold": 35,
+        "neutral_low": 60,
+        "neutral_high": 70,
+        "overbought": 80
+      },
+      "hypothesis": "シグナル発生条件をより極端な水準に絞ることで、ダマシ（誤シグナル）を減らせる。",
+      "expected_effect": "シグナル頻度の減少、1シグナルあたりの信頼度向上、勝率・リスクリワードの改善が期待される。",
+      "expected_weakness": "シグナル頻度が減りすぎることで、有効な押し目を逃す機会損失が増える可能性がある。"
+    },
+    {
+      "id": "C",
+      "name": "sensitive",
+      "name_ja": "敏感型",
+      "thresholds": {
+        "oversold": 35,
+        "slightly_oversold": 45,
+        "neutral_low": 55,
+        "neutral_high": 60,
+        "overbought": 70
+      },
+      "hypothesis": "より早期にシグナルを出すことで、押し目の初動を捉えるエントリー機会を増やせる。",
+      "expected_effect": "シグナル頻度の増加、エントリー機会の拡大。",
+      "expected_weakness": "誤シグナル（ダマシ）の増加により、勝率・平均損益が悪化するリスクがある。"
+    },
+    {
+      "id": "D",
+      "name": "asymmetric",
+      "name_ja": "非対称型",
+      "thresholds": {
+        "oversold": 30,
+        "slightly_oversold": 40,
+        "neutral_low": 50,
+        "neutral_high": 62,
+        "overbought": 72
+      },
+      "hypothesis": "日本の高配当・優待株は下値が堅く上値の伸びも緩やかという傾向があり、中立帯を若干下方（上昇余地を早めに評価）にシフトさせることで判定精度が上がる。",
+      "expected_effect": "中立帯シフトにより、上昇トレンド初期での加点タイミングが早まる。",
+      "expected_weakness": "全銘柄に一律適用した場合、値動きの荒い銘柄では逆効果になる可能性がある（業種・値動き特性による効果差が出やすい）。"
+    },
+    {
+      "id": "E",
+      "name": "textbook_simplified",
+      "name_ja": "教科書型（簡略・2閾値相当）",
+      "thresholds": {
+        "oversold": 30,
+        "slightly_oversold": 30,
+        "neutral_low": 70,
+        "neutral_high": 70,
+        "overbought": 70
+      },
+      "threshold_mapping_note": "古典的な2閾値（30/70）をbuy_timing.pyの5段階配点構造（15/12/8/5/2/0点）にそのまま当てはめると定義不能になるため、以下の対応で整理した。oversold=slightly_oversold=30とすることで12点帯を消失させ、neutral_low=neutral_high=overbought=70とすることで5点・2点帯を消失させる。結果として『RSI<=30→15点』『30<RSI<=70→8点（中立フラット）』『RSI>70→0点』という古典的な3区分相当のロジックになる。これにより『5段階配点という設計自体に効果があるのか』を検証する対照群として機能する。",
+      "hypothesis": "現行の5段階グラデーション設計ではなく、単純な3区分（売られすぎ／中立／買われすぎ）でも同等かそれ以上の成果が出せる可能性がある。",
+      "expected_effect": "ロジックの単純化。5段階設計が本当に必要かどうかの判断材料が得られる。",
+      "expected_weakness": "中立帯（30〜70）内での段階的な強弱判定ができなくなるため、A〜D案に対して情報量が落ち、成果が劣る可能性が高い（これ自体が検証仮説）。"
+    }
+  ],
+
+  "excluded_from_this_file": [
+    "experiment_results",
+    "win_rate",
+    "total_return",
+    "max_drawdown",
+    "adoption_decision"
+  ]
 }
