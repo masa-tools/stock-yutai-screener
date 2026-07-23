@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "scoring": {
+    "rsi": {
+      "oversold": 30,
+      "slightly_oversold": 40,
+      "neutral_low": 55,
+      "neutral_high": 65,
+      "overbought": 75
+    },
+    "dividend": {
+      "high": 3.0,
+      "attractive": 3.5,
+      "caution": 8.0
+    },
+    "per": {
+      "undervalue": 10,
+      "fair": 20,
+      "slightly_high": 25
+    }
+  }
+}
