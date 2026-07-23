@@ -1,1 +1,6 @@
-
+{
+  "schema_version": 1,
+  "research": {
+    "note": "Phase5-1時点では骨格のみ。本番 config/settings.json とは完全に別ファイルであり、本番設定には一切影響しません。研究用パラメータはPhase6以降、各テーマ実装時にここへ追加していきます。"
+  }
+}
