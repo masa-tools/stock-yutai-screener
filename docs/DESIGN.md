@@ -98,3 +98,10 @@ Phase4
 Phase5
 
 - Androidアプリ
+
+
+Research評価層では、Walk Forward Summary の window_metrics を唯一の入力とする。
+
+個別トレードリターンは現行スキーマでは保持されないため、研究指標は Window 単位の集約値を用いて算出する。
+
+risk_reward・平均利益・平均損失は現行スキーマでは算出対象外とする。
