@@ -34,7 +34,26 @@ metrics_research.calculate_metrics_from_runner_result() へそのまま渡すだ
   本モジュールから一切参照しない。
 """
 
+import os
+import sys
 from typing import Any, Callable
+
+# ── プロジェクトルートをsys.pathへ追加（最小限のブートストラップ） ──
+# research_app.py は「streamlit run research/research_app.py」という
+# 起動方法を前提としており、この場合 sys.path[0] はスクリプト自身の
+# ディレクトリ（research/）になる。backtest パッケージはresearch/の
+# 外（プロジェクトルート直下）に存在するため、そのままでは
+# `from backtest.walkforward_runner import ...` が解決できない
+# （ModuleNotFoundError）。
+#
+# research_app.py・backtest側・v8.1側のいずれにも変更を加えず、
+# この問題を解決するため、本ファイル内でプロジェクトルートを
+# sys.path へ追加する（既に追加済みの場合は何もしない）。
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))       # .../research/evaluation
+_RESEARCH_DIR = os.path.dirname(_THIS_DIR)                    # .../research
+_PROJECT_ROOT = os.path.dirname(_RESEARCH_DIR)                # プロジェクトルート（backtest/の親）
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from backtest.walkforward_runner import run_walkforward_runner
 from evaluation.metrics_research import calculate_metrics_from_runner_result
