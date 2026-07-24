@@ -1,45 +1,35 @@
 """
-metrics_research.py  v9 Research (Phase6-3: 評価層)
-=====================================================
-runner結果（Walk Forwardの実行結果に相当するデータ）から、
-研究テーマ共通の評価指標を算出する。
+metrics_research.py  v9 Research (Phase6-4: DESIGN.md確定設計への準拠)
+=====================================================================
+Walk Forward Summary（backtest.walkforward_summary.build_walkforward_summary()
+の戻り値）の window_metrics を唯一の入力とし、Research評価層で新たに
+必要となる指標のみを算出する。
 
-【責務】
-  - リターン列（およびエクイティカーブ）から、以下の指標を算出する:
-      total_return / max_drawdown / win_rate / risk_reward /
-      calmar_ratio / time_underwater / sortino_ratio
-  - 算出のみを担当する。保存・表示・Walk Forward実行呼び出しは行わない。
+【責務（DESIGN.md「v9研究 Research評価層 設計」に準拠）】
+  Research評価層の入力は summary["window_metrics"] とする。
+  算出する指標は以下の4つのみ:
+      total_return / calmar_ratio / sortino_ratio / time_underwater
+  これらは summary["window_metrics"][i]["avg_return"] をWindow順に
+  並べた「Window平均リターン列」から算出する**近似指標**である。
 
-【担当しないこと（Phase6-3時点で厳守）】
+【担当しないこと（DESIGN.md確定事項）】
+  - win_rate・max_dd の算出（build_metric_statistics()が既に算出済み。
+    Research評価層では再計算しない。既存値をそのまま参照すること）
+  - risk_reward・平均利益・平均損失の算出（現行スキーマでは
+    per-trade単位の生データが保持されないため、Phase6-4のスコープ対象外）
   - Walk Forward呼び出し（backtest.walkforward_runner等）
   - SQLite保存・research_storage呼び出し
   - UI表示（streamlit等）
   - 既存モジュール（app.py, strategy_v8, scoring_config等）への接続
 
-【入力データについての重要な注意】
-  本モジュールは「per-trade（銘柄・区間ごと）のリターン列」を
-  基本入力として設計している。
-  実際の backtest.walkforward_runner の戻り値（runner結果）の
-  具体的なキー構造は本Phaseでは確認していないため、
-  calculate_metrics_from_runner_result() は「想定される代表的な
-  キー名」を複数試す防御的な実装としている。
-  Walk Forward接続フェーズ（次Phase）では、実際のrunner結果の
-  構造を確認したうえで、このアダプタ部分の見直しが必要になる
-  可能性がある点に留意すること。
-
-  【Phase6-3.5追記】
-  実際にdebug_ui.pyの呼び出しパターンを調査した結果、
-  run_walkforward_runner() の戻り値には "returns" 等の
-  トップレベルキーは存在せず、代わりに
-  summary["window_metrics"] （Window単位の集計リスト。
-  各要素が avg_return / win_rate / max_dd 等を持つ）が
-  実際のデータ構造であることが判明している。
-  本ファイルのアダプタ部分（calculate_metrics_from_runner_result）
-  は、この調査結果を反映するための修正がまだ行われていない
-  （Phase6-3.5は調査のみのフェーズだったため）。
-  Phase6-4での接続実装時に、この関数の候補キー探索ロジックを
-  summary.window_metrics[].avg_return を組み立てる方式へ
-  修正する必要がある。
+【近似指標であることの明記】
+  total_return: Window平均の複利合成であり、真のポートフォリオ全体の
+    トータルリターンではない
+  calmar_ratio: 年率換算を行わない簡易版（Window期間の粒度が
+    不揃いなため）
+  sortino_ratio: Window単位の下方偏差に基づく簡易版
+  time_underwater: Window単位の疑似エクイティカーブに基づく粗い
+    時間分解能の値（日次ではない）
 
 【将来の指標追加方針】
   _METRIC_REGISTRY に (指標名, 算出関数) を追加するだけで、
@@ -112,41 +102,6 @@ def _calc_total_return(returns: Sequence[float], equity: Sequence[float]) -> flo
     return (equity[-1] / equity[0]) - 1.0
 
 
-def _calc_max_drawdown(returns: Sequence[float], equity: Sequence[float]) -> float:
-    """最大ドローダウン（0以下の値。例: -0.23 は -23%）。"""
-    return _max_drawdown_from_equity(equity)
-
-
-def _calc_win_rate(returns: Sequence[float], equity: Sequence[float]) -> float:
-    """勝率（プラスリターンの割合、0.0〜1.0）。"""
-    if not returns:
-        return 0.0
-    wins = sum(1 for r in returns if r > 0)
-    return wins / len(returns)
-
-
-def _calc_risk_reward(returns: Sequence[float], equity: Sequence[float]) -> Optional[float]:
-    """
-    リスクリワード比（平均利益 ÷ 平均損失の絶対値）。
-
-    損失トレードが1つもない場合は算出不能として None を返す
-    （ゼロ除算を避けるため）。
-    """
-    wins = [r for r in returns if r > 0]
-    losses = [r for r in returns if r < 0]
-
-    if not losses:
-        return None
-
-    avg_win = sum(wins) / len(wins) if wins else 0.0
-    avg_loss = abs(sum(losses) / len(losses))
-
-    if avg_loss == 0:
-        return None
-
-    return avg_win / avg_loss
-
-
 def _calc_calmar_ratio(returns: Sequence[float], equity: Sequence[float]) -> Optional[float]:
     """
     Calmar Ratio（トータルリターン ÷ 最大ドローダウンの絶対値）。
@@ -203,35 +158,35 @@ def _calc_sortino_ratio(returns: Sequence[float], equity: Sequence[float]) -> Op
 # calculate_metrics() 本体・既存の指標関数には触れる必要がない。
 _METRIC_REGISTRY: dict = {
     "total_return":    _calc_total_return,
-    "max_drawdown":    _calc_max_drawdown,
-    "win_rate":        _calc_win_rate,
-    "risk_reward":     _calc_risk_reward,
     "calmar_ratio":    _calc_calmar_ratio,
-    "time_underwater": _calc_time_underwater,
     "sortino_ratio":   _calc_sortino_ratio,
+    "time_underwater": _calc_time_underwater,
 }
 
 
 def calculate_metrics(returns: Sequence[float]) -> dict:
     """
-    per-trade（または区間ごと）のリターン列から、評価指標一式を算出する。
+    リターン列（Window平均リターンの列を想定）から、Research評価層の
+    指標一式を算出する。
 
     Args:
         returns: リターンの列。例: [0.02, -0.01, 0.03, -0.02, ...]
-                 （1トレード or 1区間あたりの騰落率）
+                 （Phase6-4ではWindow単位のavg_returnの列を想定）
 
     Returns:
         dict: {
             "total_return": float,
-            "max_drawdown": float,
-            "win_rate": float,
-            "risk_reward": float | None,
             "calmar_ratio": float | None,
-            "time_underwater": float,
             "sortino_ratio": float | None,
+            "time_underwater": float,
         }
-        算出不能な指標（損失トレードなし等）は None を返す
+        算出不能な指標（下落が一切ない等）は None を返す
         （Noneのまま握りつぶさず、呼び出し側で扱えるようにするため）。
+
+        win_rate・max_dd・risk_reward はDESIGN.md確定事項により
+        本関数では算出しない（win_rate・max_ddは
+        backtest.walkforward_summary.build_metric_statistics() の
+        既存値を、risk_rewardはPhase6-4のスコープ対象外として扱うこと）。
     """
     returns = list(returns)
     equity = _build_equity_curve(returns)
@@ -245,44 +200,60 @@ def calculate_metrics(returns: Sequence[float]) -> dict:
 
 def calculate_metrics_from_runner_result(runner_result: dict) -> dict:
     """
-    backtest.walkforward_runner の戻り値（runner結果）から
-    リターン列を抽出し、calculate_metrics() を呼び出すアダプタ。
+    backtest.walkforward_summary.build_walkforward_summary() の戻り値
+    （runner_result["summary"]）が持つ window_metrics から、Window平均
+    リターン列を組み立て、calculate_metrics() を呼び出すアダプタ。
 
-    【重要・Phase6-3.5調査結果を踏まえた注意】
-      run_walkforward_runner() の実際の戻り値には、本関数が探索する
-      "returns" / "trade_returns" / "period_returns" / "pnl_list" は
-      存在しないことがPhase6-3.5の調査で判明している。
-      実際のリターンに相当するデータは
-      runner_result["summary"]["window_metrics"][i]["avg_return"]
-      （Window単位の平均リターンのリスト）である可能性が高い。
-
-      そのため、本関数は現時点（Phase6-3完了時点のまま）では、
-      実際のrunner_resultを渡すと必ず ValueError が発生する
-      （想定していたキーが実際には存在しないため）。
-      これは「静かに誤った値を返す」よりは安全な失敗の仕方だが、
-      Phase6-4でWalk Forwardへ実際に接続する際は、本関数の
-      候補キー探索ロジックを summary.window_metrics 対応へ
-      修正する必要がある（Phase6-3.5調査報告を参照）。
+    【DESIGN.md確定事項】
+      Research評価層の入力は summary["window_metrics"] のみとする。
+      各要素の "avg_return" を、"window_index" の昇順に並べたものを
+      「Window平均リターン列」として扱う。
+      "success" が False のWindow（decision_report_result取得失敗等）
+      は avg_return が None であり、集計対象から除外する。
 
     Args:
-        runner_result: run_walkforward_runner() 等の戻り値を想定したdict
+        runner_result: run_walkforward_runner() の戻り値を想定したdict。
+                       runner_result["summary"] が
+                       build_walkforward_summary() の戻り値であること。
 
     Returns:
         calculate_metrics() と同じ形式のdict
+        （total_return / calmar_ratio / sortino_ratio / time_underwater）
 
     Raises:
-        ValueError: リターン列らしきデータが runner_result 内に
-                    見つからなかった場合
+        ValueError: summary が存在しない、window_metrics が存在しない、
+                    または有効な avg_return を持つWindowが1つもない場合
     """
-    candidate_keys = ("returns", "trade_returns", "period_returns", "pnl_list")
+    summary = runner_result.get("summary")
+    if not isinstance(summary, dict):
+        raise ValueError(
+            "runner_result['summary'] が存在しません。"
+            "Walk Forwardが正常に完了しているか（status/stage_statusを"
+            "確認のうえ）、summaryを持つ戻り値を渡してください。"
+        )
 
-    for key in candidate_keys:
-        if key in runner_result and runner_result[key] is not None:
-            return calculate_metrics(runner_result[key])
+    window_metrics = summary.get("window_metrics")
+    if not isinstance(window_metrics, list) or not window_metrics:
+        raise ValueError(
+            "runner_result['summary']['window_metrics'] が存在しないか"
+            "空です。build_walkforward_summary() の戻り値であることを"
+            "確認してください。"
+        )
 
-    raise ValueError(
-        "runner_result からリターン列を特定できませんでした。"
-        f"想定したキー {candidate_keys} のいずれも見つかりません。"
-        "実際のrunner結果の構造を確認し、本アダプタの候補キーを"
-        "更新してください（Walk Forward接続フェーズでの対応事項）。"
-    )
+    # success=Falseのwindow（avg_returnがNone）を除外し、window_indexの
+    # 昇順に並べ替えてからavg_returnを取り出す（時系列指標のため順序が重要）。
+    valid_windows = [
+        w for w in window_metrics
+        if w.get("success") and w.get("avg_return") is not None
+    ]
+    valid_windows.sort(key=lambda w: (w.get("window_index") is None, w.get("window_index")))
+
+    returns = [w["avg_return"] for w in valid_windows]
+
+    if not returns:
+        raise ValueError(
+            "window_metrics内に有効な(success=True かつ avg_return を持つ)"
+            "Windowが1件もありませんでした。"
+        )
+
+    return calculate_metrics(returns)
