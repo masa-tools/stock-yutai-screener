@@ -1,6 +1,6 @@
 """
-research_app.py  v9 Research (Phase6-6: オーケストレーション層)
-================================================================
+research_app.py  v9 Research (Phase6-6改訂: オーケストレーション層)
+====================================================================
 v9研究環境専用のエントリーポイント。
 
 【重要】
@@ -20,24 +20,30 @@ v9研究環境専用のエントリーポイント。
 【Phase6-6の実装範囲】
   - Walk Forward結果タブに追加された「実行」ボタン（views側で表示）が
     押されたrerunでのみ run_and_evaluate() を実行する
-  - run_and_evaluate() が送出する ValueError を {"error": str(e)} へ
-    変換し、握りつぶさず内容を保持したまま表示可能な形にする
+  - run_and_evaluate() が送出する ValueError（および strategy_fn未実装
+    による NotImplementedError）を {"error": str(e)} へ変換し、
+    握りつぶさず内容を保持したまま表示可能な形にする
   - 実行結果（またはエラー）は st.session_state に保存し、
     ボタン押下以外の通常のrerunでは再実行せずキャッシュされた結果を
     表示する
 
-【重要な注意（暫定実装であることの明記）】
-  run_and_evaluate() に渡す strategy_fn は、strategy_v9_rsi.py
-  （Phase6-2）の実際のインターフェースが本開発環境では未確認のため、
-  暫定的な _placeholder_strategy_fn を使用している。
-  strategy_v9_rsi.py の実インターフェースが確定次第、
-  この関数を置き換える必要がある。
+【strategy_fnについて（重要・修正1）】
+  strategy_v9_rsi.py（Phase6-2）の正式インターフェースは本開発環境
+  では未確認・未接続である。仮のスコアリングロジックを本番コードに
+  残さないため、_strategy_fn_not_implemented() は呼び出されると
+  必ず NotImplementedError を送出するだけの関数とし、フェイクの
+  スコア計算は一切行わない。strategy_v9_rsi.py の正式インターフェース
+  が確定次第、この関数の割り当て箇所（_ACTIVE_STRATEGY_FN）を
+  実際のstrategy_fnに置き換えること。
 
-【evaluation.walkforward_connector のimportについて】
+【evaluation.walkforward_connector のimportについて（修正2）】
   walkforward_connector.py は内部で backtest.walkforward_runner を
   importする。backtestパッケージが実行環境に存在しない場合でも
   research_app.py全体が起動不能にならないよう、import失敗はここで
   吸収し、Walk Forward結果タブ内にエラーメッセージとして表示する。
+  ただし吸収するのは ImportError（ModuleNotFoundErrorを含む）のみに
+  限定する。SyntaxError・TypeError・AttributeError等、本来デバッグ
+  すべき不具合まで握りつぶさないようにするため。
 """
 
 import streamlit as st
@@ -50,25 +56,45 @@ from views.history_view import render_history
 
 # evaluation.walkforward_connector のimportは backtestパッケージの
 # 実行時解決に依存する（詳細は walkforward_connector.py 参照）。
-# import失敗時にresearch_app.py全体が起動不能にならないよう、
-# ここで例外を吸収し、Walk Forward結果タブ内でエラー表示する。
+# 【修正2】ここで吸収するのは ImportError（ModuleNotFoundErrorは
+# ImportErrorのサブクラスのため含まれる）のみとする。
+# SyntaxError・TypeError・AttributeError等、本来修正すべき不具合は
+# 握りつぶさず通常どおり送出させ、研究環境としてデバッグしやすい
+# 状態を維持する。
 try:
     from evaluation.walkforward_connector import run_and_evaluate
     _CONNECTOR_IMPORT_ERROR = None
-except Exception as exc:  # noqa: BLE001 - 起動時import失敗を画面表示に変換するため意図的に捕捉
+except ImportError as exc:
     run_and_evaluate = None
     _CONNECTOR_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 
 _SS_KEY_WF_RESULT = "wf_result"
 
 
-def _placeholder_strategy_fn(*args, **kwargs) -> dict:
+def _strategy_fn_not_implemented(*_args, **_kwargs) -> dict:
     """
-    【暫定placeholder】strategy_v9_rsi.py の実インターフェースが
-    確定するまでの仮のスコアリング関数。実際のRSI研究ロジックは
-    一切含まない。strategy_v9_rsi.py確定後に置き換えること。
+    【修正1】仮のスコアリングロジックは一切持たない。
+
+    strategy_v9_rsi.py（Phase6-2）の正式インターフェースがまだ
+    確定・接続されていないことを明示するためだけに存在する関数。
+    フェイクのスコア（例: 固定値を返す等）を本番コードに残さないため、
+    呼び出された場合は必ず NotImplementedError を送出する。
+
+    strategy_v9_rsi.py の正式インターフェースが確定次第、
+    _ACTIVE_STRATEGY_FN の割り当てをこの関数から実際のstrategy_fnへ
+    置き換えること。
     """
-    return {"total": 50}
+    raise NotImplementedError(
+        "strategy_v9_rsi.py の正式インターフェースがまだ確定・接続されて"
+        "いません。research_app.py の _ACTIVE_STRATEGY_FN を、Phase6-2で"
+        "確定した実際の strategy_fn に置き換えてください。"
+    )
+
+
+# 【修正1】現在アクティブなstrategy_fn。strategy_v9_rsi.py確定後、
+# ここを実際の関数へ置き換える（置き換え忘れを防ぐため、
+# 割り当て箇所をこの1行に集約している）。
+_ACTIVE_STRATEGY_FN = _strategy_fn_not_implemented
 
 
 def main() -> None:
@@ -115,18 +141,24 @@ def main() -> None:
                 try:
                     result = run_and_evaluate(
                         code=run_request["code"],
-                        strategy_fn=_placeholder_strategy_fn,
-                        strategy_name="v9_rsi_placeholder",
+                        strategy_fn=_ACTIVE_STRATEGY_FN,
+                        strategy_name="v9_rsi",
                         period=run_request["period"],
                     )
-                except ValueError as e:
-                    # calculate_metrics_from_runner_result()等が送出する
-                    # 例外を握りつぶさず、表示可能な形に変換して保持する。
+                except (ValueError, NotImplementedError) as e:
+                    # calculate_metrics_from_runner_result()等が送出するValueError、
+                    # および_strategy_fn_not_implemented()が送出するNotImplementedErrorを
+                    # 握りつぶさず、表示可能な形に変換して保持する。
                     result = {"error": str(e)}
 
                 st.session_state[_SS_KEY_WF_RESULT] = result
 
             # 新しい結果を即座に表示するため、明示的にrerunする。
+            # 【修正3で再検証済み】st.rerun()を削除すると、render_walkforward_result()が
+            # 本関数内で既に（今回計算した新結果より前の）古いsession_state値を使って
+            # 描画済みであるため、クリック直後は新しい結果が反映されない
+            # （次のrerunまで表示が古いまま残る）ことをAppTestで実証したため、
+            # st.rerun()は削除せず維持する。
             # このrerunでは st.button() は False を返すため、
             # run_and_evaluate() が再実行されることはない。
             st.rerun()
