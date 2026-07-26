@@ -34,7 +34,12 @@ THEME_REGISTRY = {
         "label": "④ PER業種別",
         "module": "strategy_v9_per_sector",  # Phase7-6で実装済み
         "status": "研究準備",
-
+    },
+    "composite": {
+        "label": "⑤ Composite（複合評価）",
+        "module": "strategy_v9_composite",  # Phase7-9で実装済み
+        "status": "研究準備",
+    },
 }
 
 
