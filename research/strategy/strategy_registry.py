@@ -27,14 +27,14 @@ THEME_REGISTRY = {
     },
     "dividend": {
         "label": "③ 配当性向",
-        "module": "strategy_v9_dividend",  # Phase8で追加予定
-        "status": "未着手",
+        "module": "strategy_v9_dividend",  # Phase7-5で実装済み
+        "status": "研究準備",
     },
     "per_sector": {
         "label": "④ PER業種別",
         "module": "strategy_v9_per_sector",  # Phase7-6で実装済み
         "status": "研究準備",
-    },
+
 }
 
 
