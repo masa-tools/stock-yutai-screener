@@ -22,8 +22,8 @@ THEME_REGISTRY = {
     },
     "volume": {
         "label": "② 出来高改善",
-        "module": "strategy_v9_volume",  # Phase7で追加予定
-        "status": "未着手",
+        "module": "strategy_v9_volume",  # Phase7-3で実装済み
+        "status": "研究準備",
     },
     "dividend": {
         "label": "③ 配当性向",
