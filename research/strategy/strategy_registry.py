@@ -32,8 +32,8 @@ THEME_REGISTRY = {
     },
     "per_sector": {
         "label": "④ PER業種別",
-        "module": "strategy_v9_per_sector",  # Phase9で追加予定
-        "status": "未着手",
+        "module": "strategy_v9_per_sector",  # Phase7-6で実装済み
+        "status": "研究準備",
     },
 }
 
