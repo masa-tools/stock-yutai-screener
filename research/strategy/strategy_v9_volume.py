@@ -35,10 +35,15 @@ strategy_v9_volume.py  v9 Research (Phase7-3: Volume戦略)
 
 【Volume評価方針（最小実装）】
   window_df["Volume"] のみを評価対象とする。
-  「現在出来高 ÷ 20日平均出来高」という倍率（ratio）を算出し、
-  倍率が高い（出来高が急増している）ほど「注目度が高い＝有望」と
-  判断してスコアを高くする。0〜100点のスケールとし、5段階の閾値で
-  区分する。
+  「当日の出来高 ÷ 当日を除く過去20営業日の平均出来高」という倍率
+  （ratio）を算出し、倍率が高い（出来高が急増している）ほど
+  「注目度が高い＝有望」と判断してスコアを高くする。0〜100点の
+  スケールとし、5段階の閾値で区分する。
+
+  平均の算出対象から当日自身を除外しているのは、「今日の出来高が、
+  それまでの通常水準と比べてどれだけ増えたか」を評価するためであり、
+  当日を含めてしまうと当日の急増そのものが平均を押し上げ、倍率が
+  過小評価される（自己参照になる）ことを避けるためである。
 
   閾値・配点は「候補パラメータ（Phase7-3初期版）」として本ファイル内に
   定数で保持しており、strategy_v9_rsi.pyと同様、将来的なconfig駆動の
@@ -50,10 +55,10 @@ strategy_v9_volume.py  v9 Research (Phase7-3: Volume戦略)
   （strategy_v9_rsi.pyのNaN対応と同じ設計思想）。
     - window_dfが空
     - "Volume"列が存在しない
-    - 20日平均を計算するのに十分な日数（20日）がない
+    - 当日を除く過去20営業日分のデータがない
     - 現在出来高がNaN/None
-    - 20日平均出来高がNaN/None
-    - 20日平均出来高が0（ゼロ除算回避）
+    - 過去20営業日の平均出来高がNaN/None
+    - 過去20営業日の平均出来高が0（ゼロ除算回避）
     - 出来高データが数値化できない
   いずれの場合も、"note"に該当理由を明記する。
 """
@@ -68,10 +73,10 @@ import pandas as pd
 # （candidate_a, candidate_b等）を切り替えられるようにする前提で、
 # ロジックとは分離して定数化している（strategy_v9_rsi.pyと同じ方針）。
 
-# 20日平均出来高を算出する際の対象日数。
+# 20日平均出来高（当日を除く）を算出する際の対象営業日数。
 VOLUME_AVG_WINDOW = 20
 
-# 「現在出来高 ÷ 20日平均出来高」の倍率に対する閾値。
+# 「当日出来高 ÷ 当日を除く過去20営業日平均出来高」の倍率に対する閾値。
 VOLUME_RATIO_VERY_HIGH = 2.0     # 平均の2倍以上（強い出来高急増）
 VOLUME_RATIO_HIGH = 1.5          # 平均の1.5倍以上
 VOLUME_RATIO_SLIGHTLY_HIGH = 1.2  # 平均の1.2倍以上
@@ -96,8 +101,9 @@ def _score_from_volume(window_df: Optional[pd.DataFrame]) -> tuple[int, str]:
     window_dfの出来高情報から0〜100点のスコアと、判定理由の短い
     説明文を返す。
 
-    「現在出来高 ÷ 20日平均出来高」の倍率を算出し、5段階で評価する。
-    判定に必要なデータが揃わない場合は、安全側として0点を返す。
+    「当日出来高 ÷ 当日を除く過去20営業日平均出来高」の倍率を算出し、
+    5段階で評価する。判定に必要なデータが揃わない場合は、安全側と
+    して0点を返す。
 
     Args:
         window_df: 判定対象日までの行のみに絞り込まれたDataFrame
@@ -113,25 +119,34 @@ def _score_from_volume(window_df: Optional[pd.DataFrame]) -> tuple[int, str]:
     if "Volume" not in window_df.columns:
         return _SCORE_NO_DATA, "Volume列がありません"
 
-    if len(window_df) < VOLUME_AVG_WINDOW:
-        return _SCORE_NO_DATA, f"データ不足（{VOLUME_AVG_WINDOW}日未満のため20日平均を算出できません）"
+    # 当日（最終行）を除いた過去20営業日分が必要なため、
+    # window_dfの行数は VOLUME_AVG_WINDOW + 1（当日分）以上を要求する。
+    if len(window_df) < VOLUME_AVG_WINDOW + 1:
+        return _SCORE_NO_DATA, (
+            f"データ不足（当日を除く過去{VOLUME_AVG_WINDOW}営業日分が"
+            "ないため平均を算出できません）"
+        )
 
     current_volume = window_df["Volume"].iloc[-1]
     if current_volume is None or pd.isna(current_volume):
         return _SCORE_NO_DATA, "現在出来高がNaN/Noneです"
 
-    avg_volume = window_df["Volume"].tail(VOLUME_AVG_WINDOW).mean()
-    if avg_volume is None or pd.isna(avg_volume):
-        return _SCORE_NO_DATA, "20日平均出来高がNaN/Noneです"
+    # 当日を除く直近20営業日（末尾から21件目〜2件目）のみを平均対象にする。
+    past_volumes = window_df["Volume"].iloc[-(VOLUME_AVG_WINDOW + 1):-1]
 
+    # past_volumes.mean() 自体が非数値データ混在時にTypeErrorを送出しうるため、
+    # float変換とあわせて同じtry/exceptで保護する。
     try:
         current_volume_value = float(current_volume)
-        avg_volume_value = float(avg_volume)
+        avg_volume_value = float(past_volumes.mean())
     except (TypeError, ValueError):
         return _SCORE_NO_DATA, "出来高データが数値化できません"
 
+    if pd.isna(avg_volume_value):
+        return _SCORE_NO_DATA, "過去20営業日の平均出来高がNaN/Noneです"
+
     if avg_volume_value == 0:
-        return _SCORE_NO_DATA, "20日平均出来高が0です（ゼロ除算回避）"
+        return _SCORE_NO_DATA, "過去20営業日の平均出来高が0です（ゼロ除算回避）"
 
     ratio = current_volume_value / avg_volume_value
 
