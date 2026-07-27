@@ -85,3 +85,37 @@ def render_walkforward_result(result: Optional[dict] = None) -> None:
         "risk_reward・平均利益・平均損失は現行スキーマでは"
         "算出対象外です（DESIGN.md確定事項）。"
     )
+
+def render_walkforward_comparison(results: list) -> None:
+    """
+    strategy_comparison.run_comparison() の戻り値を比較表として表示する。
+
+    既存のrender_walkforward_result()（単一結果表示）とは責務を分離し、
+    本関数を新規追加する形で対応する。
+    """
+    import pandas as pd
+
+    st.subheader("🧪 Walk Forward比較結果（複数戦略）")
+
+    rows = []
+    for r in results:
+        if r["error"] is not None:
+            rows.append({"戦略": r["strategy_name"], "状態": f"エラー: {r['error']}"})
+            continue
+        rm = r["research_metrics"] or {}
+        rows.append({
+            "戦略": r["strategy_name"],
+            "トータルリターン（近似）": rm.get("total_return"),
+            "Calmar（簡易）": rm.get("calmar_ratio"),
+            "Sortino（簡易）": rm.get("sortino_ratio"),
+            "Time Underwater（近似）": rm.get("time_underwater"),
+            "勝率": r["win_rate"],
+            "最大DD": r["max_dd"],
+        })
+
+    st.dataframe(pd.DataFrame(rows))
+    st.caption(
+        "勝率・最大DDはmetric_statistics由来の想定パスで取得しています"
+        "（未確認事項：strategy_comparison.py参照。パス誤りの場合は"
+        "空欄表示となります）。"
+    )
