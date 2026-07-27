@@ -13,6 +13,9 @@ strategy_registry.py  v9 Research (Phase5-1: 骨格のみ)
   （strategy_v9_rsi.py 等がまだ存在しないため）。
 """
 
+import importlib
+from typing import Callable
+
 # テーマID : 表示名 : 対応モジュール名（未実装のため文字列のみ保持） : 状態
 THEME_REGISTRY = {
     "rsi": {
