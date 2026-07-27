@@ -36,8 +36,8 @@ if _STRATEGY_DIR not in sys.path:
 THEME_REGISTRY = {
     "rsi": {
         "label": "① RSI改善",
-        "module": "strategy_v9_rsi",   # Phase6で追加予定
-        "status": "未着手",
+        "module": "strategy_v9_rsi",   # Phase7-2で実装済み
+        "status": "研究準備",
     },
     "volume": {
         "label": "② 出来高改善",
