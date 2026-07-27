@@ -91,7 +91,14 @@ def render_walkforward_comparison(results: list) -> None:
     strategy_comparison.run_comparison() の戻り値を比較表として表示する。
 
     既存のrender_walkforward_result()（単一結果表示）とは責務を分離し、
-    本関数を新規追加する形で対応する。
+    本関数を新規追加する形で対応する。表示のみを担当し、Walk Forward
+    実行・比較集計ロジックは一切持たない（strategy_comparison.py側の
+    責務）。
+
+    Args:
+        results: strategy_comparison.run_comparison() の戻り値
+            （list[dict]）。各要素の"window_metrics"キーは本関数では
+            表示しない（将来拡張用に保持されているのみ）。
     """
     import pandas as pd
 
@@ -109,13 +116,13 @@ def render_walkforward_comparison(results: list) -> None:
             "Calmar（簡易）": rm.get("calmar_ratio"),
             "Sortino（簡易）": rm.get("sortino_ratio"),
             "Time Underwater（近似）": rm.get("time_underwater"),
-            "勝率": r["win_rate"],
-            "最大DD": r["max_dd"],
+            "勝率（mean）": r["win_rate"],
+            "最大DD（mean）": r["max_dd"],
         })
 
     st.dataframe(pd.DataFrame(rows))
     st.caption(
-        "勝率・最大DDはmetric_statistics由来の想定パスで取得しています"
-        "（未確認事項：strategy_comparison.py参照。パス誤りの場合は"
-        "空欄表示となります）。"
+        "勝率・最大DDはsummary.metric_statisticsのmean値です"
+        "（DESIGN.md確定事項：total_return等4指標はWindow平均リターンに"
+        "基づく近似指標であり、per-trade単位の厳密な値ではありません）。"
     )
