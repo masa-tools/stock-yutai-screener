@@ -1,7 +1,7 @@
 """
 research/evaluation/strategy_comparison.py  (Phase8: Walk Forward比較検証)
 ============================================================================
-複数戦略を同一条件（code / period / runner_kwargs）で
+複数戦略を同一条件（code / period / splitter / その他runner_kwargs）で
 walkforward_connector.run_and_evaluate() へ順次渡し、結果を
 比較用リストとして集約する薄いオーケストレーション層。
 
@@ -16,13 +16,36 @@ walkforward_connector.run_and_evaluate() へ順次渡し、結果を
     呼び出し元 or 別モジュールの責務とする）
   - UI表示（walkforward_result_view.py側の責務）
 
-【未確認事項（重要・要修正の可能性あり）】
-  runner_result内でwin_rate・max_ddが実際にどのキーに格納されているかは
-  backtest/walkforward_summary.py未確認のため特定できていない。
-  本実装では runner_result["summary"]["metric_statistics"] という
-  想定パスで試行的に取得する。このパスが誤っている場合、
-  win_rate/max_ddはNoneとして扱われる（例外は出さない設計）。
-  実際のキー構造判明後、このパスの修正が必要。
+【同一条件比較の前提（確認済み事項）】
+  backtest/walkforward_runner.py の実コード確認により、
+  run_walkforward_runner() のWindow分割（splitter）は strategy_fn と
+  完全に独立した引数として渡されることを確認済み。したがって、
+  code・period・splitter を全戦略で固定すれば、Window分割自体は
+  strategy_fnの中身（RSI/Volume/Dividend/PER Sector/Composite）に
+  一切影響されず、同一条件比較が構造的に成立する。
+  本関数は runner_kwargs を通じてこれらを一括で全戦略へ伝搬する。
+
+【win_rate・max_ddの取得パスについて（確認済み事項）】
+  backtest/walkforward_summary.py の build_walkforward_summary() /
+  build_metric_statistics() の実コード確認により、以下を確認済み：
+
+    runner_result["summary"]["metric_statistics"]["win_rate"]
+    runner_result["summary"]["metric_statistics"]["max_dd"]
+
+  というパスでアクセス可能だが、両者の値は
+  {"mean": float|None, "median": float|None, "stdev": float|None}
+  という dict であり、スカラー値ではない（成功Windowのみを対象に、
+  Window単位の集約値をさらに平均・中央値・標準偏差化したもの）。
+  本モジュールでは比較表に使う代表値として ["mean"] を採用する。
+
+  なお、Window単位の生データが必要な場合は
+  runner_result["summary"]["window_metrics"][i]["win_rate"] /
+  ["max_dd"] を別途参照できる（本モジュールでは扱わない）。
+
+【backtest_runner.run_backtest() との関係について（確認済み事項）】
+  walkforward_runner.py は backtest_runner.run_backtest() を一切
+  import・呼び出ししていないことを実コードで確認済み。本モジュールも
+  同様にbacktest_runner.pyには一切依存しない。
 """
 
 from typing import Any, Callable
@@ -40,48 +63,6 @@ def run_comparison(
     複数戦略を同一条件で実行し、比較用の結果リストを返す。
 
     Args:
-        code: 対象銘柄コード。
+        code: 対象銘柄コード。全戦略で共通。
         strategies: (strategy_fn, strategy_name) のタプルのリスト。
-        period: 全戦略共通のyfinance期間文字列（同一条件比較のため固定）。
-        **runner_kwargs: 全戦略共通で渡すrun_walkforward_runner()の引数。
-            戦略ごとに変えず、呼び出し元で固定した値を渡すこと
-            （固定しないと「同一条件比較」が成立しない）。
-
-    Returns:
-        list[dict]: strategies引数の順序を保持した結果リスト。各要素は
-            {"strategy_name", "research_metrics", "win_rate", "max_dd", "error"}。
-    """
-    results = []
-
-    for strategy_fn, strategy_name in strategies:
-        try:
-            r = run_and_evaluate(
-                code=code,
-                strategy_fn=strategy_fn,
-                strategy_name=strategy_name,
-                period=period,
-                **runner_kwargs,
-            )
-        except ValueError as e:
-            results.append({
-                "strategy_name": strategy_name,
-                "research_metrics": None,
-                "win_rate": None,
-                "max_dd": None,
-                "error": str(e),
-            })
-            continue
-
-        # 【未確認パス】判明次第、修正が必要
-        summary = r.get("runner_result", {}).get("summary", {}) or {}
-        metric_stats = summary.get("metric_statistics", {}) or {}
-
-        results.append({
-            "strategy_name": strategy_name,
-            "research_metrics": r.get("research_metrics"),
-            "win_rate": metric_stats.get("win_rate"),
-            "max_dd": metric_stats.get("max_dd"),
-            "error": None,
-        })
-
-    return results
+        period:
