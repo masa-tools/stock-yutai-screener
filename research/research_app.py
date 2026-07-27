@@ -48,6 +48,7 @@ v9研究環境専用のエントリーポイント。
 
 import streamlit as st
 
+from strategy.strategy_registry import resolve_strategy_fn, list_themes
 from views.research_home_view import render_research_home
 from views.theme_switcher_view import render_theme_switcher
 from views.strategy_compare_view import render_strategy_compare
@@ -69,32 +70,8 @@ except ImportError as exc:
     _CONNECTOR_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 
 _SS_KEY_WF_RESULT = "wf_result"
-
-
-def _strategy_fn_not_implemented(*_args, **_kwargs) -> dict:
-    """
-    【修正1】仮のスコアリングロジックは一切持たない。
-
-    strategy_v9_rsi.py（Phase6-2）の正式インターフェースがまだ
-    確定・接続されていないことを明示するためだけに存在する関数。
-    フェイクのスコア（例: 固定値を返す等）を本番コードに残さないため、
-    呼び出された場合は必ず NotImplementedError を送出する。
-
-    strategy_v9_rsi.py の正式インターフェースが確定次第、
-    _ACTIVE_STRATEGY_FN の割り当てをこの関数から実際のstrategy_fnへ
-    置き換えること。
-    """
-    raise NotImplementedError(
-        "strategy_v9_rsi.py の正式インターフェースがまだ確定・接続されて"
-        "いません。research_app.py の _ACTIVE_STRATEGY_FN を、Phase6-2で"
-        "確定した実際の strategy_fn に置き換えてください。"
-    )
-
-
-# 【修正1】現在アクティブなstrategy_fn。strategy_v9_rsi.py確定後、
-# ここを実際の関数へ置き換える（置き換え忘れを防ぐため、
-# 割り当て箇所をこの1行に集約している）。
-_ACTIVE_STRATEGY_FN = _strategy_fn_not_implemented
+_SS_KEY_SELECTED_THEME = "selected_theme"
+_DEFAULT_THEME_ID = list_themes()[0]["id"]
 
 
 def main() -> None:
@@ -130,28 +107,31 @@ def main() -> None:
         # render_walkforward_result()は「実行」ボタンが押されたrerunでのみ
         # 入力パラメータのdictを返す。それ以外のrerunではNoneを返すため、
         # 無関係な操作でWalk Forwardが再実行されることはない。
+        selected_theme_id = st.session_state.get(_SS_KEY_SELECTED_THEME, _DEFAULT_THEME_ID)
+
         run_request = render_walkforward_result(st.session_state.get(_SS_KEY_WF_RESULT))
 
         if run_request is not None:
-            if run_and_evaluate is None:
-                st.session_state[_SS_KEY_WF_RESULT] = {
-                    "error": f"Research評価層が利用できません: {_CONNECTOR_IMPORT_ERROR}"
-                }
+            try:
+                strategy_fn = resolve_strategy_fn(selected_theme_id)
+            except NotImplementedError as e:
+                st.session_state[_SS_KEY_WF_RESULT] = {"error": str(e)}
             else:
-                try:
-                    result = run_and_evaluate(
-                        code=run_request["code"],
-                        strategy_fn=_ACTIVE_STRATEGY_FN,
-                        strategy_name="v9_rsi",
-                        period=run_request["period"],
-                    )
-                except (ValueError, NotImplementedError) as e:
-                    # calculate_metrics_from_runner_result()等が送出するValueError、
-                    # および_strategy_fn_not_implemented()が送出するNotImplementedErrorを
-                    # 握りつぶさず、表示可能な形に変換して保持する。
-                    result = {"error": str(e)}
-
-                st.session_state[_SS_KEY_WF_RESULT] = result
+                if run_and_evaluate is None:
+                    st.session_state[_SS_KEY_WF_RESULT] = {
+                        "error": f"Research評価層が利用できません: {_CONNECTOR_IMPORT_ERROR}"
+                    }
+                else:
+                    try:
+                        result = run_and_evaluate(
+                            code=run_request["code"],
+                            strategy_fn=strategy_fn,
+                            strategy_name=selected_theme_id,
+                            period=run_request["period"],
+                        )
+                    except (ValueError, NotImplementedError) as e:
+                        result = {"error": str(e)}
+                    st.session_state[_SS_KEY_WF_RESULT] = result
 
             # 新しい結果を即座に表示するため、明示的にrerunする。
             # 【修正3で再検証済み】st.rerun()を削除すると、render_walkforward_result()が
