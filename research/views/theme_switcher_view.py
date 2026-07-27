@@ -13,13 +13,22 @@ theme_switcher_view.py  v9 Research (Phase5-1: 骨格のみ)
 
 import streamlit as st
 
-_THEMES = ["① RSI改善", "② 出来高改善", "③ 配当性向", "④ PER業種別"]
+from strategy.strategy_registry import list_themes
 
 
 def render_theme_switcher() -> None:
-    """研究テーマ切替画面を描画する（骨格のみ）。"""
     st.subheader("🎛 研究テーマ切替")
-    st.info("Phase5 開発中：テーマ選択UIの骨格のみです。実データ連携は未実装です。")
+    st.caption("ここで選択したテーマが、Walk Forward結果タブの「実行」に使用されます。")
 
-    st.radio("研究テーマを選択", _THEMES, index=0, disabled=True)
-    st.caption("※ 現時点では選択しても何も実行されません（Phase6以降で実装予定）")
+    themes = list_themes()
+    theme_ids = [t["id"] for t in themes]
+    label_by_id = {t["id"]: t["label"] for t in themes}
+    status_by_id = {t["id"]: t["status"] for t in themes}
+
+    selected_theme_id = st.radio(
+        "研究テーマを選択",
+        theme_ids,
+        format_func=lambda tid: label_by_id.get(tid, tid),
+        key="selected_theme",
+    )
+    st.caption(f"状態: {status_by_id.get(selected_theme_id, '不明')}")
