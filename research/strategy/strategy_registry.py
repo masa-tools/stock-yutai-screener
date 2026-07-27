@@ -52,3 +52,32 @@ def list_themes() -> list[dict]:
         {"id": theme_id, **info}
         for theme_id, info in THEME_REGISTRY.items()
     ]
+
+
+def resolve_strategy_fn(theme_id: str) -> Callable[..., dict]:
+    """
+    テーマIDに対応する strategy_fn（compute_score）を動的に解決する。
+    THEME_REGISTRY[theme_id]["module"] を手がかりに strategy.{module} を
+    動的importし、compute_score属性を返す。
+
+    Raises:
+        NotImplementedError: テーマ未登録、モジュール未実装、
+            compute_score未実装のいずれかの場合。
+    """
+    theme_info = THEME_REGISTRY.get(theme_id)
+    if theme_info is None:
+        raise NotImplementedError(f"テーマ '{theme_id}' はTHEME_REGISTRYに登録されていません。")
+
+    module_name = theme_info["module"]
+    try:
+        module = importlib.import_module(f"strategy.{module_name}")
+    except ImportError as exc:
+        raise NotImplementedError(
+            f"テーマ '{theme_id}' の実装モジュール 'strategy.{module_name}' が"
+            f"まだ利用できません（{type(exc).__name__}: {exc}）。"
+        ) from exc
+
+    compute_score = getattr(module, "compute_score", None)
+    if compute_score is None or not callable(compute_score):
+        raise NotImplementedError(f"'strategy.{module_name}' は compute_score() を実装していません。")
+    return compute_score
