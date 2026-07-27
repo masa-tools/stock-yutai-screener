@@ -14,7 +14,23 @@ strategy_registry.py  v9 Research (Phase5-1: 骨格のみ)
 """
 
 import importlib
+import os
+import sys
 from typing import Callable
+
+# ── strategy/ ディレクトリ自身をsys.pathへ追加（最小限のブートストラップ） ──
+# strategy_v9_composite.py 等、一部の戦略モジュールは同階層の他モジュールを
+# `from strategy_v9_dividend import compute_score` のようにプレフィックス
+# なし（bare）でimportする場合がある。現在の実行環境では research/ のみが
+# sys.pathに含まれ、research/strategy/ 自体は含まれていないため、この
+# bare importはそのままでは解決できない（ModuleNotFoundError）。
+#
+# strategy_v9_*.py側のimport文・ロジックには一切変更を加えず、
+# walkforward_connector.pyが採用しているのと同じ「最小限のブートストラップ」
+# 方針に倣い、本ファイル内でstrategy/自身をsys.pathへ追加することで解決する。
+_STRATEGY_DIR = os.path.dirname(os.path.abspath(__file__))
+if _STRATEGY_DIR not in sys.path:
+    sys.path.insert(0, _STRATEGY_DIR)
 
 # テーマID : 表示名 : 対応モジュール名（未実装のため文字列のみ保持） : 状態
 THEME_REGISTRY = {
