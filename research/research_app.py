@@ -165,6 +165,54 @@ def main() -> None:
             # run_and_evaluate() が再実行されることはない。
             st.rerun()
 
+        st.divider()
+        st.subheader("🧪 Walk Forward比較実行（5戦略）")
+
+        if _COMPARISON_IMPORT_ERROR is not None:
+            st.warning(
+                "比較機能への接続に失敗しています"
+                f"（backtestパッケージの読み込みエラー）: {_COMPARISON_IMPORT_ERROR}"
+            )
+
+        compare_code = st.text_input(
+            "銘柄コード（5戦略共通）", value="7203", key="wf_compare_code"
+        )
+        compare_period = st.selectbox(
+            "期間（5戦略共通）", ["6mo", "1y", "2y"], index=1, key="wf_compare_period"
+        )
+
+        if st.button("5戦略比較を実行", key="wf_compare_button"):
+            if run_comparison is None:
+                st.session_state[_SS_KEY_WF_COMPARISON] = {
+                    "error": f"比較機能が利用できません: {_COMPARISON_IMPORT_ERROR}"
+                }
+            else:
+                strategies, skipped = _build_comparison_strategies()
+                if not strategies:
+                    st.session_state[_SS_KEY_WF_COMPARISON] = {
+                        "error": "実行可能な戦略がありません（全テーマが未実装です）。"
+                    }
+                else:
+                    comparison_results = run_comparison(
+                        code=compare_code,
+                        strategies=strategies,
+                        period=compare_period,
+                    )
+                    st.session_state[_SS_KEY_WF_COMPARISON] = {
+                        "results": comparison_results,
+                        "skipped": skipped,
+                    }
+            st.rerun()
+
+        comparison_state = st.session_state.get(_SS_KEY_WF_COMPARISON)
+        if comparison_state is not None:
+            if "error" in comparison_state:
+                st.error(comparison_state["error"])
+            else:
+                for s in comparison_state.get("skipped", []):
+                    st.warning(f"テーマ '{s['theme_id']}' は比較対象から除外されました: {s['reason']}")
+                render_walkforward_comparison(comparison_state["results"])
+
     with tab_history:
         render_history()
 
