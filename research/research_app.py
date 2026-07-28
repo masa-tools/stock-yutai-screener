@@ -52,7 +52,7 @@ from strategy.strategy_registry import resolve_strategy_fn, list_themes
 from views.research_home_view import render_research_home
 from views.theme_switcher_view import render_theme_switcher
 from views.strategy_compare_view import render_strategy_compare
-from views.walkforward_result_view import render_walkforward_result
+from views.walkforward_result_view import render_walkforward_result, render_walkforward_comparison
 from views.history_view import render_history
 
 # evaluation.walkforward_connector のimportは backtestパッケージの
@@ -69,9 +69,31 @@ except ImportError as exc:
     run_and_evaluate = None
     _CONNECTOR_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 
+try:
+    from evaluation.strategy_comparison import run_comparison
+    _COMPARISON_IMPORT_ERROR = None
+except ImportError as exc:
+    run_comparison = None
+    _COMPARISON_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+
 _SS_KEY_WF_RESULT = "wf_result"
+_SS_KEY_WF_COMPARISON = "wf_comparison_result"
 _SS_KEY_SELECTED_THEME = "selected_theme"
 _DEFAULT_THEME_ID = list_themes()[0]["id"]
+
+
+def _build_comparison_strategies() -> tuple[list[tuple], list[dict]]:
+    strategies: list[tuple] = []
+    skipped: list[dict] = []
+    for theme in list_themes():
+        theme_id = theme["id"]
+        try:
+            fn = resolve_strategy_fn(theme_id)
+        except NotImplementedError as e:
+            skipped.append({"theme_id": theme_id, "reason": str(e)})
+            continue
+        strategies.append((fn, theme_id))
+    return strategies, skipped
 
 
 def main() -> None:
