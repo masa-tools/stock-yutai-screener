@@ -59,6 +59,11 @@ THEME_REGISTRY = {
         "module": "strategy_v9_composite",  # Phase7-9で実装済み
         "status": "研究準備",
     },
+    "per_sector_asymmetric": {
+        "label": "④' PER業種別（非対称モデル・Phase9研究用）",
+        "module": "strategy_v9_per_sector_asymmetric",  # Phase9で実装済み（Claude①担当）
+        "status": "研究準備",
+    },
 }
 
 
