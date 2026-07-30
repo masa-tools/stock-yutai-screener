@@ -1,19 +1,34 @@
 """
-walkforward_result_view.py  v9 Research (Phase6-5: Research評価層の表示接続)
+walkforward_result_view.py  v9 Research (Phase8.5時点: 未使用・削除候補)
 ==============================================================================
-Walk Forward結果画面。
+単一戦略のWalk Forward結果画面（表示のみ）。
 
-【役割】
+【Phase8.5での位置付け（重要）】
+  Research画面は「5戦略比較画面」を正式仕様とすることが決定され、
+  research_app.py は本ファイルの render_walkforward_result() を
+  呼び出さなくなった（Phase6-5で入力UI実装が保留されたまま、
+  run_requestが常にNoneとなる到達不能コードとしてresearch_app.py側に
+  残っていたため、Phase8.5にて呼び出し側を削除した）。
+
+  本関数自体は削除候補であるが、Claude②が確認できた範囲
+  （research_app.py・本ファイル自身）では他に呼び出し元が
+  存在しないことのみ確認済みであり、research/views配下の全ファイルに
+  対する横断的な参照確認はこの回では行えていない。そのため、
+  誤って参照が残るファイルを壊さないよう、本関数の削除は見送り、
+  未使用のまま残している。全ファイルでの参照確認が取れ次第、
+  本ファイルおよび render_walkforward_comparison() 以外の関数の
+  削除を検討すること。
+
+【役割（現状維持されている実装内容）】
   evaluation.walkforward_connector.run_and_evaluate() が返す
   Research評価指標（total_return / calmar_ratio / sortino_ratio /
-  time_underwater の4指標のみ）を表示する。
+  time_underwater の4指標のみ）を表示する（呼び出し元が存在すれば、
+  という前提のロジックのまま）。
 
 【責務の範囲（UIとロジックの分離を維持）】
   本ファイルは表示のみを担当する。Walk Forward実行そのもの
   （backtest.walkforward_runner呼び出し）や評価指標の算出
-  （metrics_research.py）は一切行わない。呼び出し元
-  （research_app.py等）が evaluation.walkforward_connector.run_and_evaluate()
-  を実行した結果（dict）を引数として受け取り、表示するだけである。
+  （metrics_research.py）は一切行わない。
 
 【DESIGN.md確定事項】
   表示対象は total_return / calmar_ratio / sortino_ratio /
@@ -21,12 +36,6 @@ Walk Forward結果画面。
   平均利益・平均損失は表示しない
   （build_metric_statistics()の既存値を使うべき指標であり、
   Research評価層のスコープ外のため）。
-
-【Phase6-5時点の実装範囲】
-  result引数が渡された場合はResearch評価指標を表示する。
-  result引数が省略された場合（デフォルトNone）は、Phase5-1と同じ
-  placeholder表示のままとする（strategy_v9系の呼び出し方が未確定な
-  段階でもresearch_app.py起動を壊さないため）。
 """
 
 from typing import Optional
@@ -90,10 +99,11 @@ def render_walkforward_comparison(results: list) -> None:
     """
     strategy_comparison.run_comparison() の戻り値を比較表として表示する。
 
-    既存のrender_walkforward_result()（単一結果表示）とは責務を分離し、
-    本関数を新規追加する形で対応する。表示のみを担当し、Walk Forward
-    実行・比較集計ロジックは一切持たない（strategy_comparison.py側の
-    責務）。
+    render_walkforward_result()（単一結果表示。Phase8.5時点で
+    research_app.pyからは呼び出されておらず未使用・削除候補）とは
+    責務を分離し、本関数を新規追加する形で対応している。表示のみを
+    担当し、Walk Forward実行・比較集計ロジックは一切持たない
+    （strategy_comparison.py側の責務）。
 
     Args:
         results: strategy_comparison.run_comparison() の戻り値
