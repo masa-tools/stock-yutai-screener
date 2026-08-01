@@ -36,6 +36,13 @@ walkforward_result_view.py  v9 Research (Phase8.5時点: 未使用・削除候�
   平均利益・平均損失は表示しない
   （build_metric_statistics()の既存値を使うべき指標であり、
   Research評価層のスコープ外のため）。
+
+【Phase9追加：Buy Signal Metrics列について】
+  render_walkforward_comparison() の比較表へ、Buy＋Strong Buyのみを
+  対象とした評価指標（strategy_comparison.run_comparison()が返す
+  各結果の"buy_signal_metrics"キー）を追加表示する。既存列
+  （トータルリターン・Calmar・Sortino・Time Underwater・勝率・
+  最大DD）の算出方法・表示内容は一切変更していない。
 """
 
 from typing import Optional
@@ -120,6 +127,17 @@ def render_walkforward_comparison(results: list) -> None:
             rows.append({"戦略": r["strategy_name"], "状態": f"エラー: {r['error']}"})
             continue
         rm = r["research_metrics"] or {}
+
+        # Phase9追加: Buy Signal Metrics（Buy＋Strong Buyのみを対象とした
+        # 評価指標）。strategy_comparison.run_comparison()の戻り値に
+        # 既に含まれる"buy_signal_metrics"をそのまま参照するのみで、
+        # 本ファイル側では計算を一切行わない。
+        buy_signal = r.get("buy_signal_metrics") or {}
+        buy_signal_stats = buy_signal.get("statistics") or {}
+        buy_signal_avg_return = (buy_signal_stats.get("avg_return") or {}).get("mean")
+        buy_signal_win_rate = (buy_signal_stats.get("win_rate") or {}).get("mean")
+        buy_signal_max_dd = (buy_signal_stats.get("max_dd") or {}).get("mean")
+
         rows.append({
             "戦略": r["strategy_name"],
             "トータルリターン（近似）": rm.get("total_return"),
@@ -128,6 +146,9 @@ def render_walkforward_comparison(results: list) -> None:
             "Time Underwater（近似）": rm.get("time_underwater"),
             "勝率（mean）": r["win_rate"],
             "最大DD（mean）": r["max_dd"],
+            "Buy+StrongBuy 平均リターン（mean）": buy_signal_avg_return,
+            "Buy+StrongBuy 勝率（mean）": buy_signal_win_rate,
+            "Buy+StrongBuy 最大DD（mean）": buy_signal_max_dd,
         })
 
     st.dataframe(pd.DataFrame(rows))
@@ -135,4 +156,9 @@ def render_walkforward_comparison(results: list) -> None:
         "勝率・最大DDはsummary.metric_statisticsのmean値です"
         "（DESIGN.md確定事項：total_return等4指標はWindow平均リターンに"
         "基づく近似指標であり、per-trade単位の厳密な値ではありません）。"
+    )
+    st.caption(
+        "「Buy+StrongBuy」列は、Decisionラベルのうち実際に買い判断を"
+        "示したケース（Buy／Strong Buy）のみを対象とした参考指標です"
+        "（Phase9追加。Watch／Avoidの成績は含みません）。"
     )
