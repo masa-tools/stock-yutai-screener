@@ -152,7 +152,7 @@ def main() -> None:
                         period=compare_period,
                     )
 
-                    st.write(comparison_results.keys())
+                    st.write(comparison_results)
                   
                     st.session_state[_SS_KEY_WF_COMPARISON] = {
                         "results": comparison_results,
