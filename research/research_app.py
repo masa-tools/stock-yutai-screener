@@ -152,8 +152,10 @@ def main() -> None:
                         period=compare_period,
                     )
 
-                    st.write("DEBUG開始")
+                    st.write("DEBUG type:")
                     st.write(type(comparison_results))
+
+                    st.write("DEBUG result:")
                     st.write(comparison_results)
                   
                     st.session_state[_SS_KEY_WF_COMPARISON] = {
