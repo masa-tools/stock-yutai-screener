@@ -151,6 +151,9 @@ def main() -> None:
                         strategies=strategies,
                         period=compare_period,
                     )
+
+                    st.write(comparison_results)
+                  
                     st.session_state[_SS_KEY_WF_COMPARISON] = {
                         "results": comparison_results,
                         "skipped": skipped,
