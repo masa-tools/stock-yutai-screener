@@ -43,10 +43,20 @@ walkforward_connector.run_and_evaluate() へ順次渡し、結果を
   walkforward_runner.pyはbacktest_runner.run_backtest()を一切
   import・呼び出ししていないことを実コードで確認済み。本モジュールも
   同様にbacktest_runner.pyには一切依存しない。
+
+【Phase9追加：Label Filtered Metrics（Buy Signal Metrics）について】
+  既存のresearch_metrics（total_return等4指標）・win_rate・max_dd・
+  window_metricsの算出方法・意味は一切変更していない。本モジュールへの
+  追加は、各戦略の結果dictへ新規キー "buy_signal_metrics" を追加する
+  ことのみである。算出は evaluation.label_filtered_metrics.py（新規・
+  backtest/配下には一切依存しないresearch専用モジュール）に完全委譲
+  し、本モジュール側では runner_result をそのまま渡すだけで、計算・
+  判定は一切行わない。
 """
 
 from typing import Any, Callable
 
+from evaluation.label_filtered_metrics import build_buy_signal_metrics
 from evaluation.walkforward_connector import run_and_evaluate
 
 
@@ -85,6 +95,11 @@ def run_comparison(
                 "window_metrics": list | None,
                     # summary.window_metrics（将来のWindow単位比較用。
                     # 今回のUIでは未使用だが常に取得可能な構造を維持）
+                "buy_signal_metrics": dict | None,
+                    # Phase9追加。evaluation.label_filtered_metrics.
+                    # build_buy_signal_metrics()の戻り値をそのまま格納
+                    # （Buy＋Strong Buyのみを対象とした評価指標）。
+                    # run_and_evaluate()がValueErrorを送出した場合はNone。
                 "error": str | None,
                     # run_and_evaluate()がValueErrorを送出した場合の
                     # メッセージ。正常時はNone。
@@ -111,6 +126,7 @@ def run_comparison(
                 "win_rate": None,
                 "max_dd": None,
                 "window_metrics": None,
+                "buy_signal_metrics": None,
                 "error": str(e),
             })
             continue
@@ -124,12 +140,19 @@ def run_comparison(
         win_rate_stat = metric_stats.get("win_rate") or {}
         max_dd_stat = metric_stats.get("max_dd") or {}
 
+        # Phase9追加: Buy Signal Metrics（Buy＋Strong Buyのみを対象とした
+        # 評価指標）。runner_result["pipeline"]から独立して算出するため、
+        # 既存のsummary/metric_statisticsの取得（上記）とは無関係であり、
+        # 既存フィールドの値には一切影響しない。
+        buy_signal_metrics = build_buy_signal_metrics(runner_result)
+
         results.append({
             "strategy_name": strategy_name,
             "research_metrics": r.get("research_metrics"),
             "win_rate": win_rate_stat.get("mean"),
             "max_dd": max_dd_stat.get("mean"),
             "window_metrics": summary.get("window_metrics"),
+            "buy_signal_metrics": buy_signal_metrics,
             "error": None,
         })
 
